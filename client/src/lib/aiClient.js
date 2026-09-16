@@ -23,7 +23,26 @@ export function parseJsonLoose(text) {
   }
 }
 
-async function geminiText(apiKey, prompt, timeoutMs = 60000) {
+/**
+ * Readable Gemini error — surfaces the REAL reason instead of a silent
+ * heuristic fallback the user can't see (this is why "Gemini did nothing").
+ */
+async function geminiError(res) {
+  let detail = '';
+  try {
+    const data = await res.json();
+    detail = data?.error?.message || '';
+  } catch { /* keep empty */ }
+  if (res.status === 400 && /api key not valid|api_key_invalid/i.test(detail)) {
+    return 'Invalid Gemini API key — check it in Settings (get a free key at aistudio.google.com/app/apikey)';
+  }
+  if (res.status === 403) return 'Gemini key rejected (403) — key may be restricted (HTTP referrer/IP limits)';
+  if (res.status === 429) return 'Gemini free-tier quota exhausted (429) — wait a minute or use a new key';
+  if (res.status === 404) return `Gemini model unavailable (404) — try a different key/region`;
+  return `Gemini error ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`;
+}
+
+async function geminiText(apiKey, prompt, timeoutMs = 60000, { json = false, maxTokens = 8192 } = {}) {
   if (!apiKey) throw new Error('no-gemini-key');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const ctrl = new AbortController();
@@ -35,14 +54,36 @@ async function geminiText(apiKey, prompt, timeoutMs = 60000) {
       signal: ctrl.signal,
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.9, maxOutputTokens: 8192 },
+        generationConfig: {
+          temperature: 0.9,
+          maxOutputTokens: maxTokens,
+          ...(json ? { responseMimeType: 'application/json' } : {}),
+        },
       }),
     });
-    if (!res.ok) throw new Error(`gemini ${res.status}`);
+    if (!res.ok) throw new Error(await geminiError(res));
     const data = await res.json();
-    return data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    if (!text) {
+      const reason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason;
+      throw new Error(reason ? `Gemini returned empty output (${reason})` : 'Gemini returned empty output');
+    }
+    return text;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Gemini timed out — network slow, please retry');
+    throw err;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Instant key health-check for the Settings "Test Key" button. */
+export async function testGeminiKey(apiKey) {
+  try {
+    const text = await geminiText(apiKey, 'Reply with exactly: OK', 20000, { maxTokens: 16 });
+    return { ok: /^ok\b/i.test(text.trim()), error: /^ok\b/i.test(text.trim()) ? '' : 'Unexpected response' };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Test failed' };
   }
 }
 
@@ -50,6 +91,7 @@ async function geminiText(apiKey, prompt, timeoutMs = 60000) {
 /* Step 1 — Strategy                                                   */
 /* ------------------------------------------------------------------ */
 export async function analyzeWebsiteStrategy(websiteData, customPrompt = '', userApiKey = '') {
+  let strategyFallbackReason = '';
   if (userApiKey) {
     try {
       const toolsCount = (websiteData.discoveredTools || []).length;
@@ -95,7 +137,7 @@ Return ONLY a valid JSON object:
   "primaryPlatforms": ["Instagram", "LinkedIn", "Twitter/X", "TikTok"]
 }`;
 
-      const raw = await geminiText(userApiKey, prompt, 60000);
+      const raw = await geminiText(userApiKey, prompt, 60000, { json: true, maxTokens: 2048 });
       const parsed = parseJsonLoose(raw);
       if (parsed && parsed.brandName) {
         const defaultPosts = isStudioPlatform && toolsCount > 30 ? 18 : studiosCount >= 6 ? 9 : 6;
@@ -110,11 +152,14 @@ Return ONLY a valid JSON object:
         parsed.engine = 'gemini';
         return parsed;
       }
-    } catch {
-      /* heuristic fallback below */
+      strategyFallbackReason = 'Gemini response was not valid strategy JSON';
+    } catch (err) {
+      strategyFallbackReason = err.message || 'Gemini call failed';
     }
   }
-  return heuristicStrategy(websiteData);
+  const heuristic = heuristicStrategy(websiteData);
+  if (strategyFallbackReason) heuristic.geminiError = strategyFallbackReason;
+  return heuristic;
 }
 
 function heuristicStrategy(websiteData) {
@@ -587,6 +632,7 @@ export async function generateFullCampaign({
   const studiosList = (websiteData.studios || []).join(', ') || 'Platform Offerings';
   const toolsList = (websiteData.discoveredTools || []).slice(0, 24).map((t) => `"${t.name}" (${t.studio})`).join(', ');
 
+  let campaignFallbackReason = '';
   if (userApiKey) {
     try {
       const prompt = `You are a world-class CMO and viral social media copywriter.
@@ -615,7 +661,7 @@ CRITICAL COPYWRITING INSTRUCTIONS:
 Return ONLY valid JSON:
 { "posts": [ { "day": "Day 1", "platform": "${platforms[0]}", "contentType": "Video Reel / Short" OR "Image Post" OR "Carousel Graphic", "studio": "...", "toolName": "...", "hook": "...", "caption": "...", "hashtags": ["#Tag1"], "callToAction": "...", "bestTime": "9:00 AM", "imagePrompt": "...", "videoScript": null or { "duration": "30s", "audioVibe": "...", "scenes": [ { "sceneNumber": 1, "time": "0:00 - 0:03", "visualDirection": "...", "onScreenText": "...", "voiceoverAudio": "..." } ] } } ] }`;
 
-      const raw = await geminiText(userApiKey, prompt, 120000);
+      const raw = await geminiText(userApiKey, prompt, 120000, { json: true, maxTokens: 8192 });
       const parsed = parseJsonLoose(raw);
       const aiPosts = Array.isArray(parsed) ? parsed : parsed?.posts;
       if (Array.isArray(aiPosts) && aiPosts.length >= Math.min(3, totalPosts)) {
@@ -685,8 +731,9 @@ Return ONLY valid JSON:
         postsResult.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
         return postsResult;
       }
-    } catch {
-      /* template fallback below */
+      campaignFallbackReason = 'Gemini response was not valid campaign JSON';
+    } catch (err) {
+      campaignFallbackReason = err.message || 'Gemini call failed';
     }
   }
 
@@ -694,5 +741,9 @@ Return ONLY valid JSON:
   templatePosts.masterBrandPrompt = generateMasterBrandPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterImagePrompt = generateMasterImagePrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
+  if (campaignFallbackReason) {
+    templatePosts.campaignGeminiError = campaignFallbackReason;
+    templatePosts.forEach((p) => { p.geminiError = campaignFallbackReason; });
+  }
   return templatePosts;
 }

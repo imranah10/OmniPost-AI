@@ -18,10 +18,14 @@ import {
   ExternalLink,
   Play,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  GalleryHorizontal,
+  AlertTriangle
 } from 'lucide-react';
 import VideoReelModal from './VideoReelModal.jsx';
+import CarouselModal from './CarouselModal.jsx';
 import MasterStudioModal from './MasterStudioModal.jsx';
+import { renderFullCarousel } from '../lib/carousel.js';
 import { API_BASE } from '../config.js';
 import { proxyImageBlob } from '../lib/net.js';
 
@@ -151,11 +155,13 @@ export default function CampaignDashboard({
   const [isDownloadingScreenshotsZip, setIsDownloadingScreenshotsZip] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'calendar'
   const [mediaViewMode, setMediaViewMode] = useState({}); // { [postId]: 'poster' | 'ai' | 'screenshot' }
+  const [carouselPost, setCarouselPost] = useState(null);
 
   // Filter posts
   const filteredPosts = posts.filter(post => {
     if (activeTab === 'all') return true;
     if (activeTab === 'videos') return post.contentType?.includes('Video');
+    if (activeTab === 'carousels') return post.contentType?.includes('Carousel');
     if (activeTab === 'images') return !post.contentType?.includes('Video');
     return post.platform.toLowerCase().includes(activeTab.toLowerCase());
   });
@@ -676,6 +682,20 @@ Create a high-converting, photorealistic commercial product advertising hero vis
             dayFolder.file("video_script.md", scriptDoc);
           }
         }
+
+        // g) Branded carousel slides — every image post ships as a ready-to-post
+        //    swipeable carousel (rendered on-canvas with the live brand palette)
+        if (!p.contentType?.includes('Video') && !p.videoScript) {
+          try {
+            const slides = await renderFullCarousel(p, strategy, websiteData);
+            for (let si = 0; si < slides.length; si++) {
+              const sBlob = await (await fetch(slides[si])).blob();
+              dayFolder.file(`carousel_slide_${si + 1}.png`, sBlob);
+            }
+          } catch (err) {
+            console.warn(`Could not bundle carousel for ${p.day}:`, err.message);
+          }
+        }
       }
 
       // Generate & Trigger download
@@ -880,6 +900,18 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
       </div>
 
+      {/* Engine transparency notice — Gemini failure is never silent anymore */}
+      {posts.some((p) => p.geminiError) && (
+        <div className="mb-3 p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-200">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold text-white">Gemini copy engine was skipped: </span>
+            {posts.find((p) => p.geminiError)?.geminiError}
+            <span className="block mt-1 text-amber-300/80">Posts below use the built-in Smart Engine. Fix the key in Settings (⚙️) and regenerate for full AI-written copy.</span>
+          </div>
+        </div>
+      )}
+
       {/* Tabs & View Mode Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-2 border-b border-slate-800">
         {/* Category filter tabs */}
@@ -887,6 +919,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
           {[
             { id: 'all', label: 'All Posts' },
             { id: 'videos', label: '🎬 Video Reels' },
+            { id: 'carousels', label: '🎠 Carousels' },
             { id: 'images', label: '📸 Visual Cards' },
             { id: 'instagram', label: 'Instagram' },
             { id: 'linkedin', label: 'LinkedIn' },
@@ -1226,8 +1259,18 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                         )}
                       </div>
                     ) : (
-                      <div className="text-[11px] text-slate-400 line-clamp-1 flex-1">
-                        {post.callToAction}
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="text-[11px] text-slate-400 line-clamp-1 flex-1" title={post.callToAction}>
+                          {post.callToAction}
+                        </span>
+                        <button
+                          onClick={() => setCarouselPost(post)}
+                          className="flex items-center gap-1.5 py-2 px-3 rounded-xl bg-pink-600/20 hover:bg-pink-600/40 border border-pink-500/40 text-pink-200 text-xs font-semibold transition cursor-pointer shrink-0"
+                          title="Open branded carousel preview (auto-built from this post)"
+                        >
+                          <GalleryHorizontal className="w-3.5 h-3.5" />
+                          <span>Carousel</span>
+                        </button>
                       </div>
                     )}
 
@@ -1308,6 +1351,16 @@ Create a high-converting, photorealistic commercial product advertising hero vis
             </div>
           ))}
         </div>
+      )}
+
+      {/* Carousel Preview Modal */}
+      {carouselPost && (
+        <CarouselModal
+          post={carouselPost}
+          strategy={strategy}
+          websiteData={websiteData}
+          onClose={() => setCarouselPost(null)}
+        />
       )}
 
       {/* Video Reel Modal */}

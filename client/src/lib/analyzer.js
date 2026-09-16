@@ -14,6 +14,8 @@
 import {
   proxyText,
   waybackText,
+  readerText,
+  microlinkMeta,
   captureScreenshot,
   preloadImage,
   extractPaletteFromImage,
@@ -77,7 +79,79 @@ function parseHtml(html, baseUrl) {
   return { doc, title, description, ogImage: abs(ogImage) || '', h1s, h2s, navTexts: [...new Set(navTexts)].slice(0, 14), internal, rawSummary };
 }
 
-/** Derive studios (sections) + discovered tools from nav/headings/links. */
+/**
+ * Parse r.jina.ai Reader markdown into the same shape as parseHtml so the
+ * whole downstream pipeline (structure, strategy, campaign) works unchanged
+ * even when every raw-HTML proxy is down.
+ */
+function parseMarkdownPage(md, baseUrl) {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const lines = String(md || '').split('\n');
+
+  let title = '';
+  let contentStart = 0;
+  for (let i = 0; i < Math.min(lines.length, 12); i++) {
+    const m = lines[i].match(/^Title:\s*(.+)$/i);
+    if (m) {
+      title = clean(m[1].replace(/[*_`]/g, ''));
+      contentStart = i + 1;
+      break;
+    }
+  }
+  const body = lines.slice(contentStart).join('\n');
+
+  const h1s = [];
+  const h2s = [];
+  for (const line of body.split('\n')) {
+    const h1 = line.match(/^#\s+(.{3,120})\s*$/);
+    if (h1 && h1s.length < 6) {
+      h1s.push(clean(h1[1].replace(/[*_`]/g, '')));
+      continue;
+    }
+    const h2 = line.match(/^#{2,3}\s+(.{3,120})\s*$/);
+    if (h2 && h2s.length < 24) h2s.push(clean(h2[1].replace(/[*_`]/g, '')));
+  }
+
+  const origin = new URL(baseUrl).origin;
+  const internal = [];
+  const seen = new Set();
+  const linkRe = /\[([^\]]{2,48})\]\(([^)\s]+)\)/g;
+  let m2;
+  while ((m2 = linkRe.exec(body)) && internal.length < 60) {
+    const name = clean(m2[1].replace(/[*_`]/g, ''));
+    let href;
+    try {
+      href = new URL(m2[2], baseUrl).toString();
+    } catch {
+      continue;
+    }
+    if (!href.startsWith(origin) || STOP_LINKS.test(href)) continue;
+    if (/\.(pdf|jpg|png|zip|xml|svg|webp)$/i.test(href)) continue;
+    if (seen.has(href)) continue;
+    seen.add(href);
+    internal.push({ href, name: name || href.split('/').filter(Boolean).pop() || 'Page' });
+  }
+
+  const navTexts = internal
+    .slice(0, 14)
+    .map((l) => l.name)
+    .filter((t) => t.length > 2 && t.length < 28 && !STOP_LINKS.test(t));
+
+  const plain = body.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[#*_>`|]/g, ' ');
+  const rawSummary = clean(plain).slice(0, 2400);
+  const description = clean(plain).slice(0, 180);
+
+  return { doc: null, title, description, ogImage: '', h1s, h2s, navTexts: [...new Set(navTexts)], internal, rawSummary };
+}
+
+/** Synthesize reader-style markdown from Microlink metadata (final safety net). */
+function mdFromMeta(meta, url) {
+  const t = meta.title || url;
+  return `Title: ${t}\nURL Source: ${url}\n\nMarkdown Content:\n# ${t}\n\n${meta.description || ''}\n\n${meta.image ? `![preview](${meta.image})\n` : ''}`;
+}
+
+const isHtmlPayload = (text) => Boolean(text) && text.trimStart().startsWith('<');
+
 function deriveStructure(pages, domain) {
   const studios = [];
   const toolsMap = new Map();
@@ -161,13 +235,27 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 }
     homeHtml = await waybackText(url);
   }
   if (!homeHtml) {
+    onStep({ key: 'crawl3', label: 'Retrying live crawl routes…', progress: 15 });
+    await new Promise((r) => setTimeout(r, 4000));
+    homeHtml = await proxyText(url);
+  }
+  if (!homeHtml) {
+    onStep({ key: 'crawl4', label: 'Trying reader service…', progress: 18 });
+    homeHtml = await readerText(url);
+  }
+  if (!homeHtml) {
+    onStep({ key: 'crawl5', label: 'Fetching site metadata…', progress: 20 });
+    const meta = await microlinkMeta(url);
+    if (meta) homeHtml = mdFromMeta(meta, url);
+  }
+  if (!homeHtml) {
     throw new Error(
-      'Free public proxies are busy or blocked right now. Please retry in a minute — or deploy this app on Vercel so it gets its own built-in same-origin proxy (100% reliable).'
+      'Live crawl is busy right now — every free crawl route got rate-limited. Please press Start again in a minute; a retry usually succeeds.'
     );
   }
 
   onStep({ key: 'parse', label: 'Extracting brand DNA & structure…', progress: 25 });
-  const home = parseHtml(homeHtml, url);
+  const home = isHtmlPayload(homeHtml) ? parseHtml(homeHtml, url) : parseMarkdownPage(homeHtml, url);
   home.url = url;
 
   // Round 2: crawl up to maxPages-1 interesting internal pages in parallel
@@ -181,7 +269,7 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 }
       interesting.map(async (l) => {
         const html = await proxyText(l.href, { timeout: 12000 });
         if (!html) return null;
-        const p = parseHtml(html, l.href);
+        const p = isHtmlPayload(html) ? parseHtml(html, l.href) : parseMarkdownPage(html, l.href);
         p.url = l.href;
         return p;
       })

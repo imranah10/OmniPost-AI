@@ -12,6 +12,7 @@ import {
   Bot,
   Target,
   Flame,
+  Zap,
   Download,
   Eye,
   Maximize2,
@@ -75,7 +76,29 @@ export default function StrategyRecommendation({
               <span className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
                 {strategy.industry}
               </span>
+              {strategy.engine === 'gemini' ? (
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Written by Google Gemini
+                </span>
+              ) : (
+                <span
+                  className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/40 flex items-center gap-1.5"
+                  title={strategy.geminiError || 'Add a Gemini key in Settings for AI-written strategy'}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  Smart Engine
+                </span>
+              )}
             </div>
+
+            {strategy.engine !== 'gemini' && (
+              <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                {strategy.geminiError
+                  ? `⚠ Gemini was skipped: ${strategy.geminiError}`
+                  : 'Tip: add a free Gemini API key in Settings (⚙️) — strategy & captions will be written by Google Gemini instead of the built-in Smart Engine.'}
+              </p>
+            )}
 
             <h2 className="font-heading text-2xl sm:text-3xl font-extrabold text-white">
               {strategy.brandName}

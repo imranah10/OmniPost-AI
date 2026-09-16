@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Key, ShieldCheck, Video, Sparkles, Check, ExternalLink } from 'lucide-react';
+import { X, Key, ShieldCheck, Video, Sparkles, Check, ExternalLink, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { testGeminiKey } from '../lib/aiClient.js';
 
 export default function SettingsModal({ isOpen, onClose, keys, onSaveKeys }) {
   if (!isOpen) return null;
@@ -8,6 +9,17 @@ export default function SettingsModal({ isOpen, onClose, keys, onSaveKeys }) {
   const [hfKeyId, setHfKeyId] = useState(keys.hfKeyId || (keys.higgsfieldApiKey?.includes(':') ? keys.higgsfieldApiKey.split(':')[0] : ''));
   const [hfKeySecret, setHfKeySecret] = useState(keys.hfKeySecret || (keys.higgsfieldApiKey?.includes(':') ? keys.higgsfieldApiKey.split(':')[1] : ''));
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // { ok, error }
+
+  const handleTestKey = async () => {
+    if (!geminiKey.trim() || testing) return;
+    setTesting(true);
+    setTestResult(null);
+    const result = await testGeminiKey(geminiKey.trim());
+    setTestResult(result);
+    setTesting(false);
+  };
 
   const handleSave = (e) => {
     e.preventDefault();
@@ -76,8 +88,30 @@ export default function SettingsModal({ isOpen, onClose, keys, onSaveKeys }) {
               className="w-full px-4 py-3 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
             />
             <p className="text-[11px] text-slate-400">
-              Used for high-tier brand strategy reasoning and custom campaign generation.
+              Powers AI strategy + campaign copy. Without it the built-in Smart Engine runs everything (still 100% free).
             </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestKey}
+                disabled={!geminiKey.trim() || testing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-slate-200 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 text-indigo-300" />}
+                {testing ? 'Testing…' : 'Test Key'}
+              </button>
+              {testResult?.ok && (
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Key works — AI copy enabled
+                </span>
+              )}
+              {testResult && !testResult.ok && (
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-red-400" title={testResult.error}>
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="line-clamp-1">{testResult.error}</span>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Higgsfield Key ID & Secret */}

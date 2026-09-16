@@ -11,9 +11,11 @@ import { analyzeSite } from './analyzer.js';
 import { analyzeWebsiteStrategy, generateFullCampaign, generateMasterBrandBlueprint } from './aiClient.js';
 import { generatePostCreatives } from './creatives.js';
 
-export async function standaloneAnalyze(url, { customPrompt = '', onStep = () => {} } = {}) {
+export async function standaloneAnalyze(url, { customPrompt = '', geminiApiKey = '', onStep = () => {} } = {}) {
   const websiteData = await analyzeSite(url, { onStep });
-  const strategy = await analyzeWebsiteStrategy(websiteData, customPrompt, '');
+  // FIX: the user's Gemini key MUST flow into the strategy step — previously a
+  // hardcoded '' meant the AI engine was silently skipped (always heuristic).
+  const strategy = await analyzeWebsiteStrategy(websiteData, customPrompt, geminiApiKey);
   return { websiteData, strategy };
 }
 

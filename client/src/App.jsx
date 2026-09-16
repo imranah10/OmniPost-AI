@@ -95,6 +95,7 @@ export default function App() {
     try {
       const { websiteData: wd, strategy: strat } = await standaloneAnalyze(url, {
         customPrompt: promptText,
+        geminiApiKey: keys.geminiApiKey,
         onStep: (s) => setLiveStep(s),
       });
       finish(wd, strat, 'standalone');

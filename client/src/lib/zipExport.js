@@ -8,9 +8,11 @@
  *   03_AI_IMAGES/ post-XX-ai.jpg · post-XX-branded.png
  *   04_ALL_WEBSITE_SCREENSHOTS/ desktop.jpg · section-N.jpg
  *   05_CAMPAIGN_SUMMARY/ strategy.json
+ *   06_CAROUSELS/ post-XX/slide-N.png (branded, ready-to-post)
  */
 import JSZip from 'jszip';
 import { proxyImageBlob } from './net.js';
+import { renderFullCarousel } from './carousel.js';
 
 function slug(s = '') {
   return String(s).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 40) || 'post';
@@ -75,6 +77,7 @@ WHAT'S INSIDE
 03_AI_IMAGES/           Ready AI artwork (post-XX-ai.jpg) + branded post cards (post-XX-branded.png)
 04_ALL_WEBSITE_SCREENSHOTS/  Live captures of the site — attach these in ChatGPT/Gemini/Midjourney for 100% brand-accurate visuals
 05_CAMPAIGN_SUMMARY/    strategy.json
+06_CAROUSELS/           Ready-to-post branded carousel slides (PNG) for each carousel post
 
 HOW TO USE (3 STEPS)
 --------------------
@@ -151,6 +154,26 @@ export async function buildCampaignZip({ strategy, websiteData, posts, masterBra
 
   const summary = zip.folder('05_CAMPAIGN_SUMMARY');
   summary.file('strategy.json', JSON.stringify({ strategy, websiteData: { ...websiteData, rawSummary: undefined } }, null, 2));
+
+  // 06_CAROUSELS — branded slide decks for every carousel-type post
+  const carouselPosts = posts.filter((p) => !p.videoScript);
+  if (carouselPosts.length) {
+    const carouselRoot = zip.folder('06_CAROUSELS');
+    for (let ci = 0; ci < carouselPosts.length; ci++) {
+      const p = carouselPosts[ci];
+      const n = String(posts.indexOf(p) + 1).padStart(2, '0');
+      const pdir = carouselRoot.folder(`post-${n}-${slug(p.toolName)}`);
+      try {
+        const slides = await renderFullCarousel(p, strategy, websiteData);
+        for (let si = 0; si < slides.length; si++) {
+          const b = await (await fetch(slides[si])).blob();
+          pdir.file(`slide-${String(si + 1).padStart(2, '0')}.png`, b);
+        }
+      } catch {
+        /* carousel render failed for this post — keep exporting */
+      }
+    }
+  }
 
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }

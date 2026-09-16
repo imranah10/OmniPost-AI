@@ -2,9 +2,14 @@
  * net.js — CORS-free networking layer for the 100% browser standalone engine.
  *
  * The deployed site is a static SPA with NO backend, so every cross-origin
- * fetch goes through a resilient fallback chain of public proxies:
+ * fetch goes through a resilient fallback chain of public services:
  *
- *   Text/HTML : corsproxy.io → api.allorigins.win/raw → codetabs
+ *   Text/HTML : same-origin /api/proxy → allorigins → cors.workers.dev →
+ *               cors.lol → allorigins/get → codetabs → r.jina.ai (reader)
+ *   Reader    : r.jina.ai returns clean markdown (different failure domain
+ *               than raw-HTML proxies — often alive when proxies are dead)
+ *   Meta      : api.microlink.io (CORS *, metadata) — last-resort so the app
+ *               NEVER dead-ends on the analysis screen
  *   Images    : direct → wsrv.nl (image CDN, CORS) → allorigins/raw
  *
  * Every helper returns null on total failure so callers can degrade
@@ -13,11 +18,11 @@
 
 const TEXT_PROXIES = [
   (u) => `/api/proxy?url=${encodeURIComponent(u)}`, // same-origin Vercel function (deployed with the site)
+  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u) => `https://test.cors.workers.dev/?${u}`,
   (u) => `https://api.cors.lol/?url=${u}`,
-  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, // JSON-wrapped variant
+  (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
 
 const IMAGE_PROXIES = [
@@ -91,7 +96,7 @@ export async function proxyText(url, { timeout = 15000 } = {}) {
       if (round === 0) await new Promise((r) => setTimeout(r, 3000));
     }
   }
-  // 3) remaining fallbacks, sequential
+  // 3) remaining HTML fallbacks, sequential
   for (const make of TEXT_PROXIES.slice(4)) {
     try {
       return await fetchTextVia(make, url, timeout);
@@ -99,7 +104,61 @@ export async function proxyText(url, { timeout = 15000 } = {}) {
       /* next */
     }
   }
+  // 4) r.jina.ai Reader — markdown, not HTML (different failure domain:
+  //    independent service that usually works from residential IPs)
+  const md = await readerText(url, { timeout: Math.max(timeout, 25000) });
+  if (md) return md;
   return null;
+}
+
+/**
+ * r.jina.ai Reader — free, CORS-enabled, returns clean markdown with a
+ * `Title:` header. No key needed for anonymous use from normal IPs.
+ * Returns the raw markdown (caller detects non-HTML and parses accordingly).
+ */
+export async function readerText(url, { timeout = 30000 } = {}) {
+  try {
+    const res = await withTimeout(
+      fetch(`https://r.jina.ai/${url}`, {
+        redirect: 'follow',
+        headers: { 'X-Return-Format': 'markdown' },
+      }),
+      timeout
+    );
+    if (!res.ok) return null;
+    const text = await res.text();
+    // Reader output: "Title: ...\n\nURL Source: ...\n\nMarkdown Content:\n..."
+    if (text && text.length > 200 && !text.trimStart().startsWith('<')) return text;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Microlink metadata (CORS *, free tier) — final safety net so analysis
+ * always produces SOMETHING meaningful (title/description/logo) even when
+ * every proxy and the reader are down.
+ */
+export async function microlinkMeta(url, { timeout = 20000 } = {}) {
+  try {
+    const res = await withTimeout(
+      fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=true`),
+      timeout
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json?.status !== 'success' || !json?.data) return null;
+    const d = json.data;
+    return {
+      title: d.title || '',
+      description: d.description || '',
+      publisher: d.publisher || '',
+      image: d.image?.url || d.logo?.url || d.screenshot?.url || '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Fetch any image (screenshot/AI art) as a Blob for canvas & ZIP export. */
