@@ -102,7 +102,8 @@ export default function SettingsModal({ isOpen, onClose, keys, onSaveKeys }) {
               </button>
               {testResult?.ok && (
                 <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Key works — AI copy enabled
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Key works — AI copy enabled{testResult.model ? ` · ${testResult.model}` : ''}
                 </span>
               )}
               {testResult && !testResult.ok && (

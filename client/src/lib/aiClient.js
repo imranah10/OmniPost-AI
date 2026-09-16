@@ -7,7 +7,91 @@
  *  • 100% free heuristic + dynamic-template fallback (no key needed)
  */
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+/**
+ * Model resolution — Google retires/renames models per key & region, so a
+ * hardcoded model 404s for some users ("Gemini model unavailable (404)").
+ * Fix: ask the key ITSELF which models it can use (official ListModels API),
+ * pick the best generateContent-capable gemini model, cache it, and on any
+ * 404 walk a fallback chain automatically.
+ */
+const MODEL_CACHE_KEY = 'omnipost_gemini_model';
+const MODEL_CHAIN = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-flash-latest',
+  'gemini-2.0-flash-lite',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-pro-latest',
+  'gemini-1.5-flash',
+];
+const BAD_MODEL_KIND = /embedding|aqa|imagen|veo|tts|native-audio|live|audio|thinking-exp|robotics|computer-use/i;
+
+const geminiCache = {
+  get() {
+    try { return localStorage.getItem(MODEL_CACHE_KEY) || ''; } catch { return ''; }
+  },
+  set(m) {
+    try { localStorage.setItem(MODEL_CACHE_KEY, m); } catch { /* private mode */ }
+  },
+  clear() {
+    try { localStorage.removeItem(MODEL_CACHE_KEY); } catch { /* ignore */ }
+  },
+};
+
+/** Official model listing for THIS key — the key knows what it may call. */
+async function listKeyModels(apiKey, timeoutMs = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(apiKey)}`, { signal: ctrl.signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const out = [];
+    for (const m of data?.models || []) {
+      const name = String(m.name || '').replace(/^models\//, '');
+      if (!/^gemini/i.test(name)) continue;
+      if (BAD_MODEL_KIND.test(name)) continue;
+      if (!Array.isArray(m.supportedGenerationMethods) || !m.supportedGenerationMethods.includes('generateContent')) continue;
+      out.push(name);
+    }
+    return out;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Pick the best model from the key's own available list. */
+function pickBestModel(available) {
+  for (const pref of MODEL_CHAIN) {
+    if (available.includes(pref)) return pref;
+  }
+  const flashes = available.filter((m) => m.includes('flash'));
+  if (flashes.length) return flashes.sort((a, b) => a.length - b.length)[0];
+  const pros = available.filter((m) => m.includes('pro'));
+  if (pros.length) return pros.sort((a, b) => a.length - b.length)[0];
+  return available[0] || '';
+}
+
+/**
+ * Resolve which model to use for this key:
+ * 1) cached from a previous success  2) key's ListModels  3) static chain head
+ */
+export async function resolveGeminiModel(apiKey) {
+  const cached = geminiCache.get();
+  if (cached) return cached;
+  const available = apiKey ? await listKeyModels(apiKey) : null;
+  if (available && available.length) {
+    const best = pickBestModel(available);
+    if (best) {
+      geminiCache.set(best);
+      return best;
+    }
+  }
+  return MODEL_CHAIN[0];
+}
 
 export function parseJsonLoose(text) {
   if (!text) return null;
@@ -38,13 +122,12 @@ async function geminiError(res) {
   }
   if (res.status === 403) return 'Gemini key rejected (403) — key may be restricted (HTTP referrer/IP limits)';
   if (res.status === 429) return 'Gemini free-tier quota exhausted (429) — wait a minute or use a new key';
-  if (res.status === 404) return `Gemini model unavailable (404) — try a different key/region`;
+  if (res.status === 404) return `Gemini model unavailable for this key/region (404)${detail ? `: ${detail.slice(0, 140)}` : ''} — auto-retrying other models…`;
   return `Gemini error ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`;
 }
 
-async function geminiText(apiKey, prompt, timeoutMs = 60000, { json = false, maxTokens = 8192 } = {}) {
-  if (!apiKey) throw new Error('no-gemini-key');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = false, maxTokens = 8192 } = {}) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -61,13 +144,18 @@ async function geminiText(apiKey, prompt, timeoutMs = 60000, { json = false, max
         },
       }),
     });
-    if (!res.ok) throw new Error(await geminiError(res));
+    if (!res.ok) {
+      const err = new Error(await geminiError(res));
+      if (res.status === 404) err.modelNotFound = true; // walk the chain
+      throw err;
+    }
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
     if (!text) {
       const reason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason;
       throw new Error(reason ? `Gemini returned empty output (${reason})` : 'Gemini returned empty output');
     }
+    geminiCache.set(model); // success → remember for future calls
     return text;
   } catch (err) {
     if (err.name === 'AbortError') throw new Error('Gemini timed out — network slow, please retry');
@@ -77,13 +165,33 @@ async function geminiText(apiKey, prompt, timeoutMs = 60000, { json = false, max
   }
 }
 
+async function geminiText(apiKey, prompt, timeoutMs = 60000, opts = {}) {
+  if (!apiKey) throw new Error('no-gemini-key');
+  // A stale cached model can 404 after Google retires it — drop cache in that case.
+  geminiCache.clear();
+  const primary = await resolveGeminiModel(apiKey);
+  const chain = [primary, ...MODEL_CHAIN.filter((m) => m !== primary)].slice(0, 4);
+  let lastErr;
+  for (const model of chain) {
+    try {
+      return await generateWithModel(apiKey, model, prompt, timeoutMs, opts);
+    } catch (err) {
+      lastErr = err;
+      if (err.modelNotFound) continue; // model retired for this key → next
+      throw err; // invalid key / quota / safety — not fixable by another model
+    }
+  }
+  throw lastErr;
+}
+
 /** Instant key health-check for the Settings "Test Key" button. */
 export async function testGeminiKey(apiKey) {
   try {
-    const text = await geminiText(apiKey, 'Reply with exactly: OK', 20000, { maxTokens: 16 });
-    return { ok: /^ok\b/i.test(text.trim()), error: /^ok\b/i.test(text.trim()) ? '' : 'Unexpected response' };
+    const text = await geminiText(apiKey, 'Reply with exactly: OK', 30000, { maxTokens: 16 });
+    const ok = /^ok\b/i.test(text.trim());
+    return { ok, error: ok ? '' : 'Unexpected response', model: geminiCache.get() || '' };
   } catch (err) {
-    return { ok: false, error: err.message || 'Test failed' };
+    return { ok: false, error: err.message || 'Test failed', model: '' };
   }
 }
 
