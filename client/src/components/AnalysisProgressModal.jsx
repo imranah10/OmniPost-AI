@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Globe, Camera, BrainCircuit, Sparkles, CheckCircle2 } from 'lucide-react';
 
-export default function AnalysisProgressModal({ isOpen, targetUrl }) {
+export default function AnalysisProgressModal({ isOpen, targetUrl, liveStep }) {
   if (!isOpen) return null;
 
   const [activeStep, setActiveStep] = useState(0);
@@ -37,6 +37,21 @@ export default function AnalysisProgressModal({ isOpen, targetUrl }) {
         <p className="mt-1 text-xs text-indigo-300 font-mono truncate max-w-sm mx-auto">
           {targetUrl}
         </p>
+
+        {liveStep?.label && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between text-[11px] font-mono text-indigo-200/90 mb-1.5">
+              <span className="truncate max-w-[280px]">{liveStep.label}</span>
+              <span>{Math.round(liveStep.progress || 0)}%</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(4, liveStep.progress || 0))}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Stepper list */}
         <div className="mt-6 space-y-3.5 text-left">

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { getUnifiedScreenshots } from './CampaignDashboard.jsx';
 import { API_BASE } from '../config.js';
+import { proxyImageBlob } from '../lib/net.js';
 
 export default function MasterStudioModal({
   isOpen,
@@ -60,10 +61,8 @@ export default function MasterStudioModal({
 
   const handleDownloadSingleShot = async (shot) => {
     try {
-      const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(shot.webUrl)}`;
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error('Fetch failed');
-      const blob = await res.blob();
+      const blob = await proxyImageBlob(shot.webUrl);
+      if (!blob) throw new Error('Fetch failed');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = shot.fileName || 'screenshot.jpg';

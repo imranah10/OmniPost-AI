@@ -14,6 +14,8 @@ import {
   Volume2
 } from 'lucide-react';
 import { API_BASE } from '../config.js';
+import { proxyImageBlob } from '../lib/net.js';
+import { pollinationsUrl } from '../lib/creatives.js';
 
 export default function VideoReelModal({ isOpen, onClose, post, brandName, higgsfieldApiKey, strategy, websiteData }) {
   if (!isOpen || !post || !post.videoScript) return null;
@@ -25,6 +27,8 @@ export default function VideoReelModal({ isOpen, onClose, post, brandName, higgs
   const [copiedScript, setCopiedScript] = useState(false);
   const [isRenderingHiggsfield, setIsRenderingHiggsfield] = useState(false);
   const [renderedVideoUrl, setRenderedVideoUrl] = useState(null);
+  const [sceneFrames, setSceneFrames] = useState([]);
+  const [isGeneratingFrames, setIsGeneratingFrames] = useState(false);
 
   const scenes = videoScript.scenes || [];
 
@@ -47,6 +51,25 @@ Call to Action: ${post.callToAction}
     setTimeout(() => setCopiedScript(false), 2000);
   };
 
+  /** Standalone fallback — free AI storyboard frames for every scene. */
+  const handleGenerateSceneFrames = async () => {
+    setIsGeneratingFrames(true);
+    try {
+      const frames = [];
+      for (const s of scenes) {
+        const brief = `Vertical 9:16 cinematic video still frame. ${s.visualDirection || ''} Bold typography overlay reading "${s.onScreenText || ''}". ${post.imagePrompt ? String(post.imagePrompt).slice(0, 160) : `Premium commercial look for ${brandName}`}. Photorealistic, dramatic lighting, 8k.`;
+        const url = pollinationsUrl(brief, { w: 720, h: 1280 });
+        const blob = await proxyImageBlob(url, { timeout: 60000 });
+        frames.push(blob ? URL.createObjectURL(blob) : url);
+      }
+      setSceneFrames(frames);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsGeneratingFrames(false);
+    }
+  };
+
   const handleRenderHiggsfield = async () => {
     setIsRenderingHiggsfield(true);
     try {
@@ -65,9 +88,12 @@ Call to Action: ${post.callToAction}
       const data = await res.json();
       if (data.videoUrl) {
         setRenderedVideoUrl(data.videoUrl);
+      } else {
+        await handleGenerateSceneFrames();
       }
     } catch (e) {
-      console.error(e);
+      // No backend (static deploy) → free scene frames instead
+      await handleGenerateSceneFrames();
     } finally {
       setIsRenderingHiggsfield(false);
     }
@@ -111,6 +137,15 @@ Call to Action: ${post.callToAction}
           <div className="lg:col-span-5 flex flex-col items-center">
             <div className="relative w-[280px] aspect-[9/16] rounded-3xl overflow-hidden border-4 border-slate-800 bg-slate-950 shadow-2xl shadow-purple-500/15 group">
               
+              {/* AI scene frame (standalone mode) */}
+              {sceneFrames[activeSceneIndex] && !renderedVideoUrl && !post.videoUrl && (
+                <img
+                  src={sceneFrames[activeSceneIndex]}
+                  alt={`Scene ${activeSceneIndex + 1} AI frame`}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
+
               {/* Background Video */}
               <video
                 key={renderedVideoUrl || post.videoUrl}
@@ -120,7 +155,7 @@ Call to Action: ${post.callToAction}
                 muted={isMuted}
                 controls
                 playsInline
-                className="w-full h-full object-cover"
+                className={`w-full h-full object-cover ${sceneFrames[activeSceneIndex] && !renderedVideoUrl && !post.videoUrl ? 'opacity-0' : ''}`}
               />
 
               {/* Unmute/Mute Toggle overlay */}
@@ -193,6 +228,19 @@ Call to Action: ${post.callToAction}
                 <Download className="w-3.5 h-3.5" />
                 Download rendered reel (MP4)
               </a>
+            )}
+
+            {sceneFrames.length > 0 && (
+              <div className="mt-2 flex items-center gap-2">
+                <a
+                  href={sceneFrames[activeSceneIndex]}
+                  download={`scene-${activeSceneIndex + 1}-frame.jpg`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600/20 text-purple-200 hover:bg-purple-600/30 text-xs font-semibold border border-purple-500/30 transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download Scene {activeSceneIndex + 1} AI frame
+                </a>
+              </div>
             )}
           </div>
 

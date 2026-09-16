@@ -1,5 +1,16 @@
 {
   "buildCommand": "npm --prefix client install && npm --prefix client run build",
   "outputDirectory": "client/dist",
-  "framework": "vite"
+  "framework": "vite",
+  "functions": {
+    "api/proxy.js": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/proxy",
+      "destination": "/api/proxy"
+    }
+  ]
 }

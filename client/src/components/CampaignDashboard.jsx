@@ -23,6 +23,7 @@ import {
 import VideoReelModal from './VideoReelModal.jsx';
 import MasterStudioModal from './MasterStudioModal.jsx';
 import { API_BASE } from '../config.js';
+import { proxyImageBlob } from '../lib/net.js';
 
 export function getUnifiedScreenshots(websiteData) {
   if (!websiteData) return [];
@@ -392,10 +393,8 @@ HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
         const shot = shotsToBundle[sIdx];
         if (shot.webUrl) {
           try {
-            const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(shot.webUrl)}`;
-            const sRes = await fetch(proxyUrl);
-            if (sRes.ok) {
-              const sBlob = await sRes.blob();
+            const sBlob = await getBlobCached(shot.webUrl);
+            if (sBlob) {
               allShotsFolder.file(shot.fileName, sBlob);
             }
           } catch (e) {
@@ -426,6 +425,26 @@ HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
     setIsExportingZip(true);
     try {
       const zip = new JSZip();
+
+      // Dedup blob cache — every unique URL fetched ONCE (parallel pre-fetch below)
+      const blobCache = new Map();
+      const getBlobCached = (url) => {
+        if (!url) return Promise.resolve(null);
+        if (blobCache.has(url)) return blobCache.get(url);
+        const pr = (async () => {
+          try {
+            if (url.startsWith('blob:') || url.startsWith('data:')) {
+              const res = await fetch(url);
+              return await res.blob();
+            }
+            return await proxyImageBlob(url, { timeout: 60000 });
+          } catch {
+            return null;
+          }
+        })();
+        blobCache.set(url, pr);
+        return pr;
+      };
 
       // 0. Root: MASTER_BRAND_BLUEPRINT.md
       zip.file("MASTER_BRAND_BLUEPRINT.md", effectiveMasterBrandBlueprint);
@@ -464,7 +483,7 @@ HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
       posts.forEach(p => {
         const clean = (val) => `"${(val || '').replace(/"/g, '""')}"`;
         const tags = clean((p.hashtags || []).join(' '));
-        csvContent += `${clean(p.day)},${clean(p.platform)},${clean(p.contentType)},${clean(p.studio)},${clean(p.toolName)},${clean(p.hook)},${clean(p.caption)},${tags},${clean(p.bestTime)},${clean(p.generatedImageUrl)},${clean(p.videoUrl || '')}\n`;
+        csvContent += `${clean(p.day)},${clean(p.platform)},${clean(p.contentType)},${clean(p.studio)},${clean(p.toolName)},${clean(p.hook)},${clean(p.caption)},${tags},${clean(p.bestTime)},${clean(p.remoteAiUrl || p.generatedImageUrl)},${clean(p.videoUrl || '')}\n`;
       });
       zip.file("campaign_schedule.csv", csvContent);
 
@@ -499,10 +518,8 @@ HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
         const shot = shotsToBundle[sIdx];
         if (shot.webUrl) {
           try {
-            const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(shot.webUrl)}`;
-            const sRes = await fetch(proxyUrl);
-            if (sRes.ok) {
-              const sBlob = await sRes.blob();
+            const sBlob = await getBlobCached(shot.webUrl);
+            if (sBlob) {
               allShotsFolder.file(shot.fileName, sBlob);
             }
           } catch (e) {
@@ -569,14 +586,17 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 - Camera: Smooth floating motion, 4k 60fps, photorealistic reflections, cinematic depth of field.`;
         dayFolder.file("ai_video_prompt.txt", vidPromptText);
 
-        // d) visual_creative.png (AI generated visual card)
-        if (p.generatedImageUrl) {
+        // d) visual_creative (AI generated visual — blob reused when already in memory)
+        {
           try {
-            const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(p.generatedImageUrl)}`;
-            const imgRes = await fetch(proxyUrl);
-            if (imgRes.ok) {
-              const blob = await imgRes.blob();
-              dayFolder.file("visual_creative.png", blob);
+            const imgBlob = p.rawBlob || (p.generatedImageUrl ? await getBlobCached(p.generatedImageUrl) : null);
+            if (imgBlob) {
+              const isPng = (imgBlob.type || '').includes('png');
+              dayFolder.file(`visual_creative.${isPng ? 'png' : 'jpg'}`, imgBlob);
+            }
+            if (p.cardDataUrl) {
+              const cardBlob = await getBlobCached(p.cardDataUrl);
+              if (cardBlob) dayFolder.file("branded_card.png", cardBlob);
             }
           } catch (err) {
             console.warn(`Could not bundle visual for ${p.day}:`, err.message);
@@ -589,11 +609,9 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
         if (inputUrl) {
           try {
-            const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(inputUrl)}`;
-            const shotRes = await fetch(proxyUrl);
-            if (shotRes.ok) {
-              const blob = await shotRes.blob();
-              dayFolder.file("screenshot_before_input.jpg", blob);
+            const inBlob = await getBlobCached(inputUrl);
+            if (inBlob) {
+              dayFolder.file("screenshot_before_input.jpg", inBlob);
             }
           } catch (err) {
             console.warn(`Could not bundle input screenshot for ${p.day}:`, err.message);
@@ -602,11 +620,9 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
         if (outputUrl) {
           try {
-            const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(outputUrl)}`;
-            const shotRes = await fetch(proxyUrl);
-            if (shotRes.ok) {
-              const blob = await shotRes.blob();
-              dayFolder.file("screenshot_after_output.jpg", blob);
+            const outBlob = await getBlobCached(outputUrl);
+            if (outBlob) {
+              dayFolder.file("screenshot_after_output.jpg", outBlob);
             }
           } catch (err) {
             console.warn(`Could not bundle output screenshot for ${p.day}:`, err.message);
@@ -617,11 +633,9 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         const shotUrl = p.screenshotUrl || outputUrl || inputUrl || (websiteData.screenshots && websiteData.screenshots[0]?.webUrl) || '';
         if (shotUrl) {
           try {
-            const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(shotUrl)}`;
-            const shotRes = await fetch(proxyUrl);
-            if (shotRes.ok) {
-              const blob = await shotRes.blob();
-              dayFolder.file("raw_screenshot.jpg", blob);
+            const shotBlob = await getBlobCached(shotUrl);
+            if (shotBlob) {
+              dayFolder.file("raw_screenshot.jpg", shotBlob);
             }
           } catch (err) {
             console.warn(`Could not bundle raw screenshot for ${p.day}:`, err.message);
@@ -699,9 +713,8 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         suffix = 'screenshot';
       }
 
-      const proxyUrl = `${API_BASE}/api/proxy-image?url=${encodeURIComponent(targetUrl)}`;
-      const res = await fetch(proxyUrl);
-      const blob = await res.blob();
+      const blob = await proxyImageBlob(targetUrl);
+      if (!blob) throw new Error('could not fetch');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${post.day}_${strategy.brandName}_${suffix}.jpg`;

@@ -1,5 +1,8 @@
 # 🚀 OmniPost AI — Autonomous URL-to-Campaign Marketing Machine
 
+> **100% browser-based — NO backend needed.** Paste any website URL: OmniPost crawls every page, captures live screenshots, extracts the brand palette, auto-decides the campaign duration, writes day-wise posts with captions + hashtags, generates AI marketing artwork & video prompts, and packs EVERYTHING into one ZIP you can feed to ChatGPT / Gemini / Midjourney / Runway / Higgsfield.
+> Works with zero API keys (free heuristic engine + free Pollinations image AI). Add a Gemini API key in Settings for CMO-grade AI copywriting.
+
 An intelligent, fully automated marketing platform that reads any website URL, performs comprehensive automated research, captures live website screenshots, evaluates brand identity, automatically determines optimal campaign duration and post count, and generates complete multi-day social media campaigns ($15–$30 agency quality posts, captions, hashtags, ultra-HD images, and short-form video reels).
 
 ---
@@ -25,6 +28,23 @@ An intelligent, fully automated marketing platform that reads any website URL, p
   - Includes a smart autonomous heuristic engine that works 100% free out-of-the-box even without API keys!
 
 ---
+
+## 🧩 How it works (Standalone Engine)
+
+Everything runs **in your browser** — no login, no server, no data leaves your machine:
+
+| Step | What happens | Tech |
+|---|---|---|
+| 1. Deep crawl | Fetches homepage + up to 5 internal pages, parses headings/nav/links → discovers sections, studios & tools | Same-origin Vercel proxy + DOMParser |
+| 2. Live screenshots | Real captures of homepage & key pages | WordPress mShots (free, no key) |
+| 3. Brand DNA | Title, USP, headings, features, health score, 5-color palette from the live screenshot | Canvas pixel analysis |
+| 4. Strategy | Auto-decides days / post count / video-vs-image mix | Free heuristics, or your Gemini key |
+| 5. Campaign | Day-wise posts: hook, caption, hashtags, CTA, best time, per-platform | Free templates, or your Gemini key |
+| 6. AI artwork | Photorealistic marketing visuals + branded 1080×1350 cards with your palette | Pollinations Flux (free) |
+| 7. Video reels | Scene-by-scene scripts + AI storyboard frames per scene | Prompt-ready for Runway / Higgsfield / Sora |
+| 8. 1-click ZIP | Master prompts, day-wise plan, schedule CSV, captions, AI images, screenshots, README | JSZip in-browser |
+
+**Deployed functions:** `/api/proxy` (Vercel serverless, included) fetches pages/screenshots with CORS — no third-party proxy dependency.
 
 ## 🛠️ Quick Start
 
