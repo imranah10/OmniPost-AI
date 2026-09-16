@@ -11,11 +11,13 @@ import {
   RefreshCw,
   Video,
   Clock,
-  Volume2
+  Volume2,
+  Zap
 } from 'lucide-react';
 import { API_BASE } from '../config.js';
 import { proxyImageBlob } from '../lib/net.js';
 import { pollinationsUrl } from '../lib/creatives.js';
+import { renderReelWebM } from '../lib/reelRender.js';
 
 export default function VideoReelModal({ isOpen, onClose, post, brandName, higgsfieldApiKey, strategy, websiteData }) {
   if (!isOpen || !post || !post.videoScript) return null;
@@ -29,6 +31,9 @@ export default function VideoReelModal({ isOpen, onClose, post, brandName, higgs
   const [renderedVideoUrl, setRenderedVideoUrl] = useState(null);
   const [sceneFrames, setSceneFrames] = useState([]);
   const [isGeneratingFrames, setIsGeneratingFrames] = useState(false);
+  const [isRenderingFree, setIsRenderingFree] = useState(false);
+  const [renderInfo, setRenderInfo] = useState('');
+  const [renderProgress, setRenderProgress] = useState('');
 
   const scenes = videoScript.scenes || [];
 
@@ -88,14 +93,52 @@ Call to Action: ${post.callToAction}
       const data = await res.json();
       if (data.videoUrl) {
         setRenderedVideoUrl(data.videoUrl);
+        setRenderInfo('✅ Higgsfield render complete — download below.');
       } else {
+        setRenderInfo(data.error
+          ? `⚠️ Higgsfield render failed (${String(data.error).slice(0, 80)}). Use the FREE In-Browser Render below.`
+          : '⚠️ Higgsfield render unavailable. Use the FREE In-Browser Render below.');
         await handleGenerateSceneFrames();
       }
     } catch (e) {
-      // No backend (static deploy) → free scene frames instead
+      // No backend (static deploy) → point the user to the free in-browser render
+      setRenderInfo('ℹ️ Higgsfield API needs a backend. Use the FREE In-Browser Render below — it works without any key.');
       await handleGenerateSceneFrames();
     } finally {
       setIsRenderingHiggsfield(false);
+    }
+  };
+
+  /** 100% free in-browser render — canvas + MediaRecorder, no API key. */
+  const handleRenderFree = async () => {
+    if (isRenderingFree) return;
+    setIsRenderingFree(true);
+    setRenderInfo('');
+    try {
+      const frames = sceneFrames.length
+        ? sceneFrames
+        : [post.generatedImageUrl || post.remoteAiUrl || post.rawAiUrl || post.imagePrompt].filter(Boolean);
+      const { blob, url } = await renderReelWebM({
+        frames,
+        scenes,
+        hook: post.hook,
+        brand: brandName || strategy?.brandName || 'OmniPost',
+        palette: websiteData?.palette || [],
+        onProgress: (p) => {
+          if (p.phase === 'frames') setRenderProgress(`Preparing scene ${p.index}/${p.total}…`);
+          else if (p.phase === 'render') setRenderProgress('Recording reel…');
+          else if (p.phase === 'encode') setRenderProgress('Finalizing video…');
+        },
+      });
+      setRenderedVideoUrl(url);
+      post.videoUrl = url;         // included in the ZIP export
+      post.videoBlob = blob;
+      setRenderInfo(`✅ Reel rendered FREE in-browser (${scenes.length} scenes, silent — add trending audio in the app). Download below.`);
+    } catch (e) {
+      setRenderInfo(`⚠️ In-browser render failed: ${String(e).slice(0, 100)}`);
+    } finally {
+      setIsRenderingFree(false);
+      setRenderProgress('');
     }
   };
 
@@ -222,11 +265,11 @@ Call to Action: ${post.callToAction}
             {post.videoUrl && (
               <a
                 href={post.videoUrl}
-                download
+                download={`${(post.toolName || 'reel').replace(/\s+/g, '_')}_reel.${(post.videoBlob?.type || '').includes('mp4') ? 'mp4' : 'webm'}`}
                 className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600/20 text-emerald-200 hover:bg-emerald-600/30 text-xs font-semibold border border-emerald-500/30 transition"
               >
                 <Download className="w-3.5 h-3.5" />
-                Download rendered reel (MP4)
+                Download rendered reel {(post.videoBlob?.type || '').includes('mp4') ? '(MP4)' : '(WebM)'}
               </a>
             )}
 
@@ -330,11 +373,11 @@ Call to Action: ${post.callToAction}
               {(post.videoUrl || renderedVideoUrl) && (
                 <a
                   href={renderedVideoUrl || post.videoUrl}
-                  download={`${brandName.replace(/\s+/g, '_')}_reel_${post.day}.mp4`}
+                  download={`${brandName.replace(/\s+/g, '_')}_reel_${post.day}.${((post.videoBlob?.type || renderedVideoUrl || '').includes('mp4')) ? 'mp4' : 'webm'}`}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Download Reel (.MP4)</span>
+                  <span>Download Reel ({((post.videoBlob?.type || renderedVideoUrl || '').includes('mp4')) ? '.MP4' : '.WebM'})</span>
                 </a>
               )}
 
@@ -356,7 +399,32 @@ Call to Action: ${post.callToAction}
                   </>
                 )}
               </button>
+
+              <button
+                type="button"
+                disabled={isRenderingFree || isRenderingHiggsfield}
+                onClick={handleRenderFree}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
+              >
+                {isRenderingFree ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>{renderProgress || 'Rendering FREE reel…'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    <span>⚡ Render Reel FREE (In-Browser)</span>
+                  </>
+                )}
+              </button>
             </div>
+
+            {renderInfo && (
+              <div className="mt-3 p-3 rounded-xl bg-slate-900/90 border border-slate-700/70 text-[11px] text-slate-200 leading-relaxed">
+                {renderInfo}
+              </div>
+            )}
 
           </div>
 

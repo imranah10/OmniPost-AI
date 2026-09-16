@@ -603,9 +603,11 @@ Create a high-converting, photorealistic commercial product advertising hero vis
           }
         }
 
-        // e) Before (Input) and After (Output) live screenshots
-        const inputUrl = p.inputScreenshotUrl || '';
-        const outputUrl = p.outputScreenshotUrl || p.screenshotUrl || '';
+        // e) Before (Input) and After (Output) live screenshots —
+        //    cycle through ALL captured pages so every day gets DIFFERENT real shots
+        const allShots = websiteData.screenshots || websiteData.capturedScreenshots || [];
+        const inputUrl = p.inputScreenshotUrl || (allShots.length ? allShots[i % allShots.length]?.webUrl : '');
+        const outputUrl = p.outputScreenshotUrl || (allShots.length ? allShots[(i + 1) % allShots.length]?.webUrl : p.screenshotUrl || '');
 
         if (inputUrl) {
           try {
@@ -642,14 +644,18 @@ Create a high-converting, photorealistic commercial product advertising hero vis
           }
         }
 
-        // f) If video post: video_reel.mp4 and video_script.md
+        // f) If video post: video_reel.webm/.mp4 and video_script.md
         if (p.contentType?.includes('Video') || p.videoScript) {
-          if (p.videoUrl) {
+          if (p.videoBlob) {
+            const isWebm = (p.videoBlob.type || '').includes('webm');
+            dayFolder.file(`video_reel.${isWebm ? 'webm' : 'mp4'}`, p.videoBlob);
+          } else if (p.videoUrl) {
             try {
               const vidRes = await fetch(p.videoUrl);
               if (vidRes.ok) {
                 const vBlob = await vidRes.blob();
-                dayFolder.file("video_reel.mp4", vBlob);
+                const isWebm = (vBlob.type || '').includes('webm');
+                dayFolder.file(`video_reel.${isWebm ? 'webm' : 'mp4'}`, vBlob);
               }
             } catch (err) {
               console.warn(`Could not bundle video for ${p.day}:`, err.message);
