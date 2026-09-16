@@ -11,9 +11,10 @@ import {
   Layers
 } from 'lucide-react';
 
-export default function UrlInputSection({ onStartAnalysis, isLoading, astraMode = true, onToggleAstra = () => {} }) {
+export default function UrlInputSection({ onStartAnalysis, isLoading, pilotMode = true, onTogglePilot = () => {} }) {
   const [url, setUrl] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
+  const [carouselPrompt, setCarouselPrompt] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedPlatforms, setSelectedPlatforms] = useState([
     'Instagram',
@@ -54,7 +55,7 @@ export default function UrlInputSection({ onStartAnalysis, isLoading, astraMode 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!url.trim()) return;
-    onStartAnalysis(url.trim(), customPrompt.trim(), selectedPlatforms);
+    onStartAnalysis(url.trim(), customPrompt.trim(), selectedPlatforms, carouselPrompt.trim());
   };
 
   const handleSelectSample = (sampleUrl) => {
@@ -124,22 +125,22 @@ export default function UrlInputSection({ onStartAnalysis, isLoading, astraMode 
             </button>
           </div>
 
-          {/* ASTRA MODE — full autonomy toggle */}
+          {/* OMNIPILOT — full autonomy engine toggle */}
           <div
             role="switch"
-            aria-checked={astraMode}
-            onClick={() => onToggleAstra(!astraMode)}
+            aria-checked={pilotMode}
+            onClick={() => onTogglePilot(!pilotMode)}
             className={`flex items-center justify-between gap-3 p-3.5 rounded-2xl border cursor-pointer transition-all ${
-              astraMode
+              pilotMode
                 ? 'bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-pink-950/40 border-indigo-500/50 shadow-lg shadow-indigo-500/10'
                 : 'bg-slate-900/40 border-slate-800/80'
             }`}
           >
             <div className="flex items-center gap-3 min-w-0">
-              <span className={`text-xl ${astraMode ? 'animate-pulse' : ''}`}>🛰️</span>
+              <span className={`text-xl ${pilotMode ? 'animate-pulse' : ''}`}>🛩️</span>
               <div className="min-w-0">
-                <div className={`text-xs font-bold ${astraMode ? 'text-white' : 'text-slate-400'}`}>
-                  ASTRA MODE — Full Autonomy
+                <div className={`text-xs font-bold ${pilotMode ? 'text-white' : 'text-slate-400'}`}>
+                  OMNIPILOT™ — Full Autonomy Engine
                 </div>
                 <div className="text-[10px] text-slate-400 leading-snug">
                   Zero clicks: deep-crawls every page, screenshots everything, auto-writes copy,
@@ -148,11 +149,11 @@ export default function UrlInputSection({ onStartAnalysis, isLoading, astraMode 
               </div>
             </div>
             <span
-              className={`shrink-0 w-11 h-6 rounded-full relative transition ${astraMode ? 'bg-indigo-500' : 'bg-slate-700'}`}
+              className={`shrink-0 w-11 h-6 rounded-full relative transition ${pilotMode ? 'bg-indigo-500' : 'bg-slate-700'}`}
             >
               <span
                 className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
-                  astraMode ? 'left-[22px]' : 'left-0.5'
+                  pilotMode ? 'left-[22px]' : 'left-0.5'
                 }`}
               />
             </span>
@@ -216,17 +217,33 @@ export default function UrlInputSection({ onStartAnalysis, isLoading, astraMode 
 
           {/* Advanced Prompt Area */}
           {showAdvanced && (
-            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2 animate-in fade-in duration-200">
-              <label className="block text-xs font-semibold text-slate-300">
-                Custom Focus / Specific Offer (Optional)
-              </label>
-              <textarea
-                rows={2}
-                value={customPrompt}
-                onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="e.g. 'Highlight our 9 studios and 100+ free tools', 'Focus on 100% private client-side processing'..."
-                className="w-full p-3 rounded-lg bg-slate-900 border border-slate-700/80 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-              />
+            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3 animate-in fade-in duration-200">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300">
+                  Custom Focus / Specific Offer (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  placeholder="e.g. 'Highlight our 9 studios and 100+ free tools', 'Focus on 100% private client-side processing'..."
+                  className="mt-1.5 w-full p-3 rounded-lg bg-slate-900 border border-slate-700/80 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <span>🎠</span>
+                  <span>Carousel Instructions — swipe-by-swipe plan (Optional)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={carouselPrompt}
+                  onChange={(e) => setCarouselPrompt(e.target.value)}
+                  placeholder="e.g. 'Slide-by-slide tutorial: problem → why old way fails → our fix → proof → result → CTA', 'Educational carousels in Hinglish', 'Before/after transformation story'..."
+                  className="mt-1.5 w-full p-3 rounded-lg bg-slate-900 border border-slate-700/80 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-pink-500"
+                />
+                <p className="mt-1 text-[10px] text-slate-500">Your instructions shape every carousel's individual slides (cover → swipe points → CTA).</p>
+              </div>
             </div>
           )}
         </form>

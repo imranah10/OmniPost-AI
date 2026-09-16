@@ -25,6 +25,7 @@ export async function standaloneGenerateCampaign({
   days,
   totalPosts,
   customPrompt,
+  carouselPrompt,
   selectedPlatforms,
   geminiApiKey,
   onPostDone = () => {},
@@ -38,6 +39,7 @@ export async function standaloneGenerateCampaign({
     totalPosts: safePosts,
     days: safeDays,
     customPrompt,
+    carouselPrompt,
     selectedPlatforms,
     userApiKey: geminiApiKey,
   });

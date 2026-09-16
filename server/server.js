@@ -82,6 +82,7 @@ app.post('/api/generate-campaign', async (req, res) => {
       days = 14,
       totalPosts = 10,
       customPrompt = '',
+      carouselPrompt = '',
       selectedPlatforms = [],
       geminiApiKey,
       higgsfieldApiKey
@@ -107,6 +108,7 @@ app.post('/api/generate-campaign', async (req, res) => {
       totalPosts: safePosts,
       days: safeDays,
       customPrompt,
+      carouselPrompt,
       selectedPlatforms,
       userApiKey: geminiApiKey
     });

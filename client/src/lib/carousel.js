@@ -77,47 +77,83 @@ export function extractCaptionPoints(caption, max = 3) {
 }
 
 /**
- * Build the 6-slide content plan for a post — fully dynamic from post data.
- * Returns [{ kind, kicker, headline, body }]
+ * Build the 6-slide content plan for a post — ALWAYS exactly 6 slides:
+ *   1 cover + 3 swipe points + 1 USP + 1 CTA (CTA is never cut again).
+ * Priority 1: a dedicated AI-authored slide plan (post.carouselContent — built
+ * from the user's own carousel prompt via Gemini).
+ * Priority 2: dynamically extracted from the post's caption + strategy USP,
+ * with the user's carousel brief (post.carouselBrief) as the first point.
  */
-export function buildCarouselSlides(post, strategy, websiteData) {
-  const brand = strategy?.brandName || websiteData?.title || 'Brand';
-  const domain = websiteData?.domain || '';
-  const points = extractCaptionPoints(post.caption, 3);
-  const usp = strategy?.uniqueSellingPoint || websiteData?.description || `Why ${brand} wins`;
-
-  const slides = [
-    {
-      kind: 'cover',
-      kicker: post.studio || 'Featured',
-      headline: post.hook || `Discover ${post.toolName || brand}`,
-      body: `${post.toolName ? `${post.toolName} — ` : ''}swipe to see why it matters →`,
-    },
-  ];
-  points.forEach((p, i) => {
-    slides.push({
+function padMiddle(middle, brand, post) {
+  while (middle.length < 3) {
+    middle.push({
       kind: 'point',
-      kicker: `Point ${i + 1}`,
-      headline: p.length > 90 ? `${p.slice(0, 87)}…` : p,
-      body: '',
-    });
-  });
-  while (slides.length < 5) {
-    slides.push({
-      kind: 'point',
-      kicker: `Point ${slides.length - 1}`,
+      kicker: `Point ${middle.length + 1}`,
       headline: `${post.toolName || brand} works for you 24/7`,
       body: '',
     });
   }
-  slides.push({ kind: 'usp', kicker: 'Why it wins', headline: usp.length > 120 ? `${usp.slice(0, 117)}…` : usp, body: '' });
-  slides.push({
+  return middle.slice(0, 3);
+}
+
+export function buildCarouselSlides(post, strategy, websiteData) {
+  const brand = strategy?.brandName || websiteData?.title || 'Brand';
+  const domain = websiteData?.domain || '';
+  const usp = strategy?.uniqueSellingPoint || websiteData?.description || `Why ${brand} wins`;
+  const uspSlide = { kind: 'usp', kicker: 'Why it wins', headline: usp.length > 120 ? `${usp.slice(0, 117)}…` : usp, body: '' };
+  const ctaSlide = {
     kind: 'cta',
     kicker: brand,
     headline: post.callToAction || `Try it now → ${domain}`,
     body: domain,
-  });
-  return slides.slice(0, 6);
+  };
+
+  // 1) AI-authored slide-by-slide plan (user's carousel prompt applied)
+  const provided = Array.isArray(post?.carouselContent)
+    ? post.carouselContent.filter((s) => s && (s.headline || s.kicker))
+    : [];
+  if (provided.length) {
+    const cover = {
+      kind: 'cover',
+      kicker: provided[0].kicker || post.studio || 'Featured',
+      headline: provided[0].headline || post.hook || `Discover ${post.toolName || brand}`,
+      body: provided[0].body || `${post.toolName ? `${post.toolName} — ` : ''}swipe to see why it matters →`,
+    };
+    const middle = provided.slice(1, 4).map((s) => ({
+      kind: 'point',
+      kicker: s.kicker || 'Point',
+      headline: s.headline || '',
+      body: s.body || '',
+    }));
+    return [cover, ...padMiddle(middle, brand, post), uspSlide, ctaSlide]; // exactly 6
+  }
+
+  // 2) Caption-derived plan (Smart Engine / no AI plan)
+  const points = extractCaptionPoints(post.caption, 3).map((p) => ({
+    kind: 'point',
+    kicker: 'Point',
+    headline: p.length > 90 ? `${p.slice(0, 87)}…` : p,
+    body: '',
+  }));
+
+  // The user's own carousel brief always becomes the first swipe point
+  const brief = String(post.carouselBrief || '').trim();
+  if (brief) {
+    points.unshift({
+      kind: 'point',
+      kicker: 'Your Brief',
+      headline: brief.length > 90 ? `${brief.slice(0, 87)}…` : brief,
+      body: '',
+    });
+  }
+
+  const cover = {
+    kind: 'cover',
+    kicker: post.studio || 'Featured',
+    headline: post.hook || `Discover ${post.toolName || brand}`,
+    body: `${post.toolName ? `${post.toolName} — ` : ''}swipe to see why it matters →`,
+  };
+  return [cover, ...padMiddle(points, brand, post), uspSlide, ctaSlide]; // exactly 6
 }
 
 /**

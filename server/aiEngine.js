@@ -214,6 +214,7 @@ export async function generateFullCampaign({
   totalPosts,
   days,
   customPrompt,
+  carouselPrompt,
   selectedPlatforms,
   userApiKey
 }) {
@@ -251,6 +252,7 @@ CORE SECTIONS / STUDIOS: ${studiosList}
 DISCOVERED CAPABILITIES / SERVICES: ${toolsList}
 KEY VALUE PILLARS & HEADINGS: ${(websiteData.h1s || []).concat(websiteData.h2s || []).slice(0, 8).join(' | ')}
 ${customPrompt ? `USER SPECIAL FOCUS: ${customPrompt}` : ''}
+${carouselPrompt ? `CAROUSEL-SPECIFIC INSTRUCTIONS (MUST shape every "Carousel Graphic" post): ${carouselPrompt}` : ''}
 
 CRITICAL COPYWRITING INSTRUCTIONS:
 - ONLY assign each post to one of these user-selected platforms: ${platforms.join(', ')}.
@@ -370,7 +372,7 @@ Return ONLY valid JSON:
   }
 
   /* ---- Dynamic Studio & Tool Template fallback (works 100% industry-specific) ---- */
-  const templatePosts = buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, videoAt, platforms, bestTimes, dayOf });
+  const templatePosts = buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, carouselPrompt, videoAt, platforms, bestTimes, dayOf });
   templatePosts.masterBrandPrompt = generateMasterBrandPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterImagePrompt = generateMasterImagePrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
@@ -383,6 +385,7 @@ function buildTemplateCampaign({
   totalPosts,
   days,
   customPrompt,
+  carouselPrompt,
   videoAt,
   platforms,
   bestTimes,
@@ -403,6 +406,7 @@ function buildTemplateCampaign({
   const results = [];
   for (let i = 0; i < totalPosts; i++) {
     const isVideo = videoAt.has(i);
+    const isCarousel = !isVideo && i % 3 === 0;
     const platform = platforms[i % platforms.length];
     const tool = tools[i % tools.length];
     const studio = tool.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
@@ -421,12 +425,14 @@ function buildTemplateCampaign({
         `✅ Dubai-managed governance & audit-ready compliance\n` +
         `✅ 24/7 dedicated support with seamless time-zone overlap\n\n` +
         `${customPrompt ? `🎯 Focus: ${customPrompt}\n\n` : ''}` +
+        `${carouselPrompt && isCarousel ? `🎠 Carousel focus: ${carouselPrompt}\n\n` : ''}` +
         `👇 Ready to build your high-impact team? Learn more and get started at ${websiteData.domain}`
       : `Ready to upgrade your workflow?\n\nDiscover ${tool.name} inside ${studio} on ${strategy.brandName}.\n\n` +
         `⚡ ${tool.description || 'Fast, reliable, and modern'}\n` +
         `🔒 Built for enterprise reliability and seamless performance\n` +
         `✨ Instant access without unnecessary friction\n\n` +
         `${customPrompt ? `🎯 Focus: ${customPrompt}\n\n` : ''}` +
+        `${carouselPrompt && isCarousel ? `Carousel focus: ${carouselPrompt}\n\n` : ''}` +
         `👇 Try it now at ${websiteData.domain}`;
 
     const cta = `Explore ${tool.name} 👉 ${websiteData.domain}`;

@@ -111,48 +111,81 @@ export function parseJsonLoose(text) {
  * Readable Gemini error — surfaces the REAL reason instead of a silent
  * heuristic fallback the user can't see (this is why "Gemini did nothing").
  */
-async function geminiError(res) {
-  let detail = '';
-  try {
-    const data = await res.json();
-    detail = data?.error?.message || '';
-  } catch { /* keep empty */ }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function geminiError(res, preDetail = '') {
+  let detail = preDetail;
+  if (!detail) {
+    try {
+      const data = await res.json();
+      detail = data?.error?.message || '';
+    } catch { /* keep empty */ }
+  }
   if (res.status === 400 && /api key not valid|api_key_invalid/i.test(detail)) {
     return 'Invalid Gemini API key — check it in Settings (get a free key at aistudio.google.com/app/apikey)';
   }
   if (res.status === 403) return 'Gemini key rejected (403) — key may be restricted (HTTP referrer/IP limits)';
-  if (res.status === 429) return 'Gemini free-tier quota exhausted (429) — wait a minute or use a new key';
+  if (res.status === 429) return 'Gemini free-tier quota exhausted (429) — auto-retried, still rate-limited. Wait a minute and regenerate, or use a new key';
+  if (res.status === 500) return 'Gemini server error (500) — auto-retried, still failing. Try again in a moment';
+  if (res.status === 503) return 'Gemini is overloaded (503 — high demand on Google\'s side). Auto-retried 3×, still busy — try Regenerate again in a minute';
   if (res.status === 404) return `Gemini model unavailable for this key/region (404)${detail ? `: ${detail.slice(0, 140)}` : ''} — auto-retrying other models…`;
   return `Gemini error ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`;
 }
 
-async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = false, maxTokens = 8192 } = {}) {
+async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = false, maxTokens = 8192, noThinking = false } = {}) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    // ROOT-CAUSE FIX for "Gemini returned empty output (MAX_TOKENS)":
+    // gemini-2.5-flash "thinks" by default and hidden thinking tokens count
+    // against maxOutputTokens — a 2048-budget call can burn everything on
+    // thinking and return ZERO text. Disabling thinking for flash models makes
+    // the full budget available for the actual answer.
+    const generationConfig = {
+      temperature: 0.9,
+      maxOutputTokens: maxTokens,
+      ...(json ? { responseMimeType: 'application/json' } : {}),
+    };
+    if (!noThinking && /2\.5-flash/.test(model)) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: ctrl.signal,
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.9,
-          maxOutputTokens: maxTokens,
-          ...(json ? { responseMimeType: 'application/json' } : {}),
-        },
+        generationConfig,
       }),
     });
     if (!res.ok) {
-      const err = new Error(await geminiError(res));
+      let preDetail = '';
+      try { preDetail = (await res.json())?.error?.message || ''; } catch { /* keep empty */ }
+      const err = new Error(await geminiError(res, preDetail));
+      err.geminiStatus = res.status;
       if (res.status === 404) err.modelNotFound = true; // walk the chain
+      if (res.status === 429 || res.status === 500 || res.status === 503) err.retryable = true;
+      if (res.status === 400 && /thinking/i.test(preDetail)) err.thinkingRejected = true;
+      // Some keys reject thinkingConfig (older API surfaces) — retry once without it
+      if (err.thinkingRejected && !noThinking) {
+        return generateWithModel(apiKey, model, prompt, timeoutMs, { json, maxTokens, noThinking: true });
+      }
       throw err;
     }
     const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    const cand = data?.candidates?.[0];
+    const text = cand?.content?.parts?.map((p) => p.text).join('') || '';
     if (!text) {
-      const reason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason;
+      const reason = cand?.finishReason || data?.promptFeedback?.blockReason;
+      if (reason === 'MAX_TOKENS') {
+        // The budget ran out before any text was written — never permanent.
+        // geminiText() retries this with a doubled token budget.
+        const err = new Error('Gemini hit MAX_TOKENS before writing output — auto-retrying with a larger budget');
+        err.retryable = true;
+        err.maxTokensIssue = true;
+        throw err;
+      }
       throw new Error(reason ? `Gemini returned empty output (${reason})` : 'Gemini returned empty output');
     }
     geminiCache.set(model); // success → remember for future calls
@@ -165,21 +198,37 @@ async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = fals
   }
 }
 
+/**
+ * Resilient Gemini text call — survives everything Google can throw at it:
+ *  • 429/500/503 (quota & "high demand") → exponential-backoff retries per model
+ *  • MAX_TOKENS empty output → same model retried with a DOUBLED token budget
+ *  • 404 (model retired per key/region) → walk to the next model in the chain
+ *  • thinkingConfig rejected → automatically retried without it
+ * Only truly fatal errors (invalid/restricted key, safety block, timeout) fail fast.
+ */
 async function geminiText(apiKey, prompt, timeoutMs = 60000, opts = {}) {
   if (!apiKey) throw new Error('no-gemini-key');
-  // A stale cached model can 404 after Google retires it — drop cache in that case.
-  geminiCache.clear();
+  geminiCache.clear(); // a stale cached model can 404 after Google retires it
   const primary = await resolveGeminiModel(apiKey);
   const chain = [primary, ...MODEL_CHAIN.filter((m) => m !== primary)].slice(0, 4);
   let lastErr;
   for (const model of chain) {
-    try {
-      return await generateWithModel(apiKey, model, prompt, timeoutMs, opts);
-    } catch (err) {
-      lastErr = err;
-      if (err.modelNotFound) continue; // model retired for this key → next
-      throw err; // invalid key / quota / safety — not fixable by another model
+    let budget = opts.maxTokens || 8192;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await generateWithModel(apiKey, model, prompt, timeoutMs, { ...opts, maxTokens: budget });
+      } catch (err) {
+        lastErr = err;
+        if (err.modelNotFound) break;            // retired for this key → next model
+        if (!err.retryable || attempt === 2) break; // fatal, or retries exhausted
+        await sleep(1200 * (attempt + 1) + Math.round(Math.random() * 700)); // ≈1.2s, 2.6s
+        if (err.maxTokensIssue) budget *= 2;     // give the answer more room
+      }
     }
+    if (lastErr && !lastErr.modelNotFound && !lastErr.retryable) {
+      throw lastErr; // invalid key / safety / timeout — another model won't help
+    }
+    // retryable-exhausted OR model-retired → fall through to the next model
   }
   throw lastErr;
 }
@@ -622,7 +671,7 @@ Copy and paste this entire document into ChatGPT (GPT-4o) or Claude, then ask:
 ==============================================================================`;
 }
 
-function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, videoAt, platforms, bestTimes, dayOf }) {
+function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, carouselPrompt, videoAt, platforms, bestTimes, dayOf }) {
   const tools = (websiteData.discoveredTools && websiteData.discoveredTools.length > 0)
     ? websiteData.discoveredTools
     : (websiteData.studios || []).map((s) => ({
@@ -638,6 +687,7 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
   const results = [];
   for (let i = 0; i < totalPosts; i++) {
     const isVideo = videoAt.has(i);
+    const isCarousel = !isVideo && i % 3 === 0;
     const platform = platforms[i % platforms.length];
     const tool = tools[i % tools.length];
     const studio = tool.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
@@ -656,12 +706,14 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
         `✅ Enterprise governance & reliability\n` +
         `✅ Dedicated support with seamless delivery\n\n` +
         `${customPrompt ? `🎯 Focus: ${customPrompt}\n\n` : ''}` +
+        `${carouselPrompt && isCarousel ? `🎠 Carousel focus: ${carouselPrompt}\n\n` : ''}` +
         `👇 Ready to build? Learn more at ${websiteData.domain}`
       : `Ready to upgrade your workflow?\n\nDiscover ${tool.name} inside ${studio} on ${strategy.brandName}.\n\n` +
         `⚡ ${tool.description || 'Fast, reliable, and modern'}\n` +
         `🔒 Built for reliability and seamless performance\n` +
         `✨ Instant access without unnecessary friction\n\n` +
         `${customPrompt ? `🎯 Focus: ${customPrompt}\n\n` : ''}` +
+        `${carouselPrompt && isCarousel ? `🎠 Carousel focus: ${carouselPrompt}\n\n` : ''}` +
         `👇 Try it now at ${websiteData.domain}`;
 
     const cta = `Explore ${tool.name} 👉 ${websiteData.domain}`;
@@ -689,7 +741,8 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
       id: `post-${i + 1}`,
       day: `Day ${dayOf(i)}`,
       platform,
-      contentType: isVideo ? 'Video Reel / Short' : (i % 3 === 0 ? 'Carousel Graphic' : 'Image Post'),
+      contentType: isVideo ? 'Video Reel / Short' : (isCarousel ? 'Carousel Graphic' : 'Image Post'),
+      carouselBrief: isCarousel ? (carouselPrompt || '') : '',
       studio,
       toolName: tool.name,
       hook,
@@ -721,6 +774,7 @@ export async function generateFullCampaign({
   totalPosts,
   days,
   customPrompt,
+  carouselPrompt,
   selectedPlatforms,
   userApiKey,
 }) {
@@ -756,6 +810,7 @@ CORE SECTIONS: ${studiosList}
 DISCOVERED CAPABILITIES: ${toolsList}
 KEY HEADINGS: ${(websiteData.h1s || []).concat(websiteData.h2s || []).slice(0, 8).join(' | ')}
 ${customPrompt ? `USER SPECIAL FOCUS: ${customPrompt}` : ''}
+${carouselPrompt ? `CAROUSEL-SPECIFIC INSTRUCTIONS (MUST shape every "Carousel Graphic" post): ${carouselPrompt}` : ''}
 
 CRITICAL COPYWRITING INSTRUCTIONS:
 - ONLY assign each post to one of these platforms: ${platforms.join(', ')}.
@@ -764,10 +819,11 @@ CRITICAL COPYWRITING INSTRUCTIONS:
 - Captions: first line = scroll-stopping hook naming the capability + outcome; body 3-5 punchy lines; CTA invites to ${websiteData.domain}.
 - Hashtags: 8-10 relevant, customized for ${strategy.brandName}.
 - imagePrompt: vivid photorealistic commercial advertising prompt for this post.
+- For every post whose contentType is "Carousel Graphic", ALSO include "carouselSlides": an array of EXACTLY 4 objects, each {"kicker": "short label (max 22 chars)", "headline": "punchy swipeable headline (max 90 chars)", "body": "one supporting line (optional, max 140 chars)"}. Slide 1 = scroll-stopping cover hook; slides 2-4 = ONE distinct idea per swipe (a dedicated \"Why it wins\" slide and the final CTA slide are rendered automatically — do not include them).
 - videoScript: for video posts (${[...videoAt].join(', ')}), 4 cinematic scenes with time, visualDirection, onScreenText, voiceoverAudio.
 
 Return ONLY valid JSON:
-{ "posts": [ { "day": "Day 1", "platform": "${platforms[0]}", "contentType": "Video Reel / Short" OR "Image Post" OR "Carousel Graphic", "studio": "...", "toolName": "...", "hook": "...", "caption": "...", "hashtags": ["#Tag1"], "callToAction": "...", "bestTime": "9:00 AM", "imagePrompt": "...", "videoScript": null or { "duration": "30s", "audioVibe": "...", "scenes": [ { "sceneNumber": 1, "time": "0:00 - 0:03", "visualDirection": "...", "onScreenText": "...", "voiceoverAudio": "..." } ] } } ] }`;
+{ "posts": [ { "day": "Day 1", "platform": "${platforms[0]}", "contentType": "Video Reel / Short" OR "Image Post" OR "Carousel Graphic", "studio": "...", "toolName": "...", "hook": "...", "caption": "...", "hashtags": ["#Tag1"], "callToAction": "...", "bestTime": "9:00 AM", "imagePrompt": "...", "carouselSlides": null or [{ "kicker": "...", "headline": "...", "body": "..." } x4], "videoScript": null or { "duration": "30s", "audioVibe": "...", "scenes": [ { "sceneNumber": 1, "time": "0:00 - 0:03", "visualDirection": "...", "onScreenText": "...", "voiceoverAudio": "..." } ] } } ] }`;
 
       const raw = await geminiText(userApiKey, prompt, 120000, { json: true, maxTokens: 8192 });
       const parsed = parseJsonLoose(raw);
@@ -803,6 +859,18 @@ Return ONLY valid JSON:
             websiteData,
           });
 
+          // Dedicated AI-authored carousel slide plan (user's carousel prompt applied)
+          const providedSlides = Array.isArray(p.carouselSlides)
+            ? p.carouselSlides
+                .filter((s) => s && (s.headline || s.kicker))
+                .slice(0, 6)
+                .map((s) => ({
+                  kicker: String(s.kicker || '').slice(0, 30),
+                  headline: String(s.headline || '').slice(0, 120),
+                  body: String(s.body || '').slice(0, 160),
+                }))
+            : null;
+
           return {
             id: `post-${i + 1}`,
             day: `Day ${dayOf(i)}`,
@@ -829,6 +897,7 @@ Return ONLY valid JSON:
             imagePrompt: String(p.imagePrompt || prompts.aiImagePrompt).slice(0, 600),
             aiImagePrompt: prompts.aiImagePrompt,
             aiVideoPrompt: prompts.aiVideoPrompt,
+            carouselContent: providedSlides,
             videoScript: script,
             engine: 'gemini',
           };
@@ -845,7 +914,7 @@ Return ONLY valid JSON:
     }
   }
 
-  const templatePosts = buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, videoAt, platforms, bestTimes, dayOf });
+  const templatePosts = buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, carouselPrompt, videoAt, platforms, bestTimes, dayOf });
   templatePosts.masterBrandPrompt = generateMasterBrandPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterImagePrompt = generateMasterImagePrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });

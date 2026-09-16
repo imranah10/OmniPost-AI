@@ -27,6 +27,7 @@ export default function App() {
   const [step, setStep] = useState('input'); // 'input' | 'analyzing' | 'strategy' | 'campaign'
   const [targetUrl, setTargetUrl] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
+  const [carouselPrompt, setCarouselPrompt] = useState('');
   const [websiteData, setWebsiteData] = useState(null);
   const [strategy, setStrategy] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -39,14 +40,18 @@ export default function App() {
   const [engineMode, setEngineMode] = useState('auto'); // 'server' | 'standalone'
   const [liveStep, setLiveStep] = useState(null);
   const [genProgress, setGenProgress] = useState(null);
-  // ASTRA MODE — full autonomy: deep-crawl every page, auto-accept the plan,
+  // OMNIPILOT — full autonomy: deep-crawl every page, auto-accept the plan,
   // auto-generate the entire campaign. Zero clicks after the URL (default ON).
-  const [astraMode, setAstraMode] = useState(() => {
-    try { return localStorage.getItem('omnipost_astra') !== 'off'; } catch { return true; }
+  const [pilotMode, setPilotMode] = useState(() => {
+    try {
+      const v = localStorage.getItem('omnipost_omnipilot');
+      if (v !== null) return v !== 'off';
+      return localStorage.getItem('omnipost_astra') !== 'off'; // migrate old key
+    } catch { return true; }
   });
-  const toggleAstra = (on) => {
-    setAstraMode(on);
-    try { localStorage.setItem('omnipost_astra', on ? 'on' : 'off'); } catch {}
+  const togglePilot = (on) => {
+    setPilotMode(on);
+    try { localStorage.setItem('omnipost_omnipilot', on ? 'on' : 'off'); } catch {}
   };
 
   const handleSaveKeys = (newKeys) => {
@@ -61,11 +66,12 @@ export default function App() {
   const [selectedPlatforms, setSelectedPlatforms] = useState(['Instagram', 'LinkedIn', 'Twitter/X', 'TikTok']);
 
   // Step 1: Trigger autonomous analysis of URL — server first, standalone fallback
-  const handleStartAnalysis = async (url, promptText, platforms) => {
+  const handleStartAnalysis = async (url, promptText, platforms, carouselText) => {
     const activePlatforms = platforms && platforms.length ? platforms : selectedPlatforms;
     setSelectedPlatforms(activePlatforms);
     setTargetUrl(url);
     setCustomPrompt(promptText || '');
+    setCarouselPrompt(carouselText || '');
     setErrorMessage('');
     setStep('analyzing');
     setLiveStep({ key: 'crawl', label: 'Connecting…', progress: 4 });
@@ -135,6 +141,7 @@ export default function App() {
             days,
             totalPosts,
             customPrompt,
+            carouselPrompt,
             selectedPlatforms,
             geminiApiKey: keys.geminiApiKey,
             higgsfieldApiKey: keys.higgsfieldApiKey
@@ -154,6 +161,7 @@ export default function App() {
           days,
           totalPosts,
           customPrompt,
+          carouselPrompt,
           selectedPlatforms,
           geminiApiKey: keys.geminiApiKey,
           onPostDone,
@@ -205,6 +213,7 @@ export default function App() {
     setMasterBlueprint('');
     setTargetUrl('');
     setCustomPrompt('');
+    setCarouselPrompt('');
     setErrorMessage('');
   };
 
@@ -238,8 +247,8 @@ export default function App() {
           <UrlInputSection
             onStartAnalysis={handleStartAnalysis}
             isLoading={false}
-            astraMode={astraMode}
-            onToggleAstra={toggleAstra}
+            pilotMode={pilotMode}
+            onTogglePilot={togglePilot}
           />
         )}
 
@@ -257,7 +266,7 @@ export default function App() {
             strategy={strategy}
             onConfirmGeneration={handleConfirmGeneration}
             isGeneratingCampaign={isGeneratingCampaign}
-            astraMode={astraMode}
+            pilotMode={pilotMode}
           />
         )}
 

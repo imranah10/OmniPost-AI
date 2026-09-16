@@ -905,9 +905,12 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         <div className="mb-3 p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-200">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div>
-            <span className="font-semibold text-white">Gemini copy engine was skipped: </span>
+            <span className="font-semibold text-white">Gemini couldn't write this run: </span>
             {posts.find((p) => p.geminiError)?.geminiError}
-            <span className="block mt-1 text-amber-300/80">Posts below use the built-in Smart Engine. Fix the key in Settings (⚙️) and regenerate for full AI-written copy.</span>
+            <span className="block mt-1 text-amber-300/80">
+              Everything below was written by the built-in Smart Engine and is ready to post as-is.
+              Gemini was busy or unavailable even after automatic retries — tap Regenerate in a minute, or check the key in Settings (⚙️).
+            </span>
           </div>
         </div>
       )}

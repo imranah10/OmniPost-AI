@@ -280,8 +280,8 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 13 
   onStep({ key: 'structure', label: 'Mapping studios, tools & capabilities…', progress: 55 });
   const structure = deriveStructure(pages, domain);
 
-  onStep({ key: 'screenshots', label: `Astra: capturing ALL ${interesting.length + 1} pages…`, progress: 68 });
-  // ASTRA total capture — every crawled page gets a live screenshot, not just
+  onStep({ key: 'screenshots', label: `OmniPilot: capturing ALL ${interesting.length + 1} pages…`, progress: 68 });
+  // OMNIPILOT total capture — every crawled page gets a live screenshot, not just
   // the first four. The homepage capture is awaited (needed for the brand
   // palette); every other page is warmed upstream in a gentle stagger so
   // mShots has time to generate before posts/ZIP fetch them.
