@@ -20,8 +20,10 @@ import {
   ChevronDown,
   ChevronUp,
   GalleryHorizontal,
-  AlertTriangle
+  AlertTriangle,
+  Globe
 } from 'lucide-react';
+import { generateLanguagePack } from '../lib/aiClient.js';
 import VideoReelModal from './VideoReelModal.jsx';
 import CarouselModal from './CarouselModal.jsx';
 import MasterStudioModal from './MasterStudioModal.jsx';
@@ -138,6 +140,9 @@ export default function CampaignDashboard({
   masterVideoPrompt,
   masterBlueprint,
   higgsfieldApiKey, 
+  geminiApiKey = '',
+  onRegenerate,
+  isGeneratingCampaign = false,
   onReset 
 }) {
   const [activeTab, setActiveTab] = useState('all');
@@ -156,6 +161,10 @@ export default function CampaignDashboard({
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'calendar'
   const [mediaViewMode, setMediaViewMode] = useState({}); // { [postId]: 'poster' | 'ai' | 'screenshot' }
   const [carouselPost, setCarouselPost] = useState(null);
+  const [langPack, setLangPack] = useState(null);
+  const [langState, setLangState] = useState('idle'); // 'idle' | 'loading' | 'ready' | 'error'
+  const [langError, setLangError] = useState('');
+  const [copiedLang, setCopiedLang] = useState('');
 
   // Filter posts
   const filteredPosts = posts.filter(post => {
@@ -698,6 +707,19 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         }
       }
 
+      // 9. WORLD_LANGUAGES — AI-transcreated hero posts per market
+      if (langPack && langPack.languages && Object.keys(langPack.languages).length) {
+        const langFolder = zip.folder("WORLD_LANGUAGES_5");
+        langFolder.file("README_LANGUAGES.txt", "One .txt per language — your 3 hero posts transcreated by Gemini for native audiences (cultural adaptation, not word-by-word translation).\nPaste straight into the native-market account.\n");
+        for (const [langName, data] of Object.entries(langPack.languages)) {
+          let langTxt = `${strategy.brandName} — ${langName} Campaign Posts (AI-transcreated)\n${'='.repeat(64)}\n\n`;
+          (data.posts || []).forEach((lp, li) => {
+            langTxt += `--- POST ${li + 1} ---\nHOOK: ${lp.hook}\n\nCAPTION:\n${lp.caption}\n\nHASHTAGS: ${(lp.hashtags || []).join(' ')}\n\n`;
+          });
+          langFolder.file(`${langName.replace(/[^a-zA-Z0-9]/g, '_') || 'Language'}.txt`, langTxt);
+        }
+      }
+
       // Generate & Trigger download
       const content = await zip.generateAsync({ type: "blob" });
       const downloadLink = document.createElement("a");
@@ -752,6 +774,52 @@ Create a high-converting, photorealistic commercial product advertising hero vis
     }
   };
 
+  const loadLanguages = async () => {
+    if (langState === 'loading') return;
+    if (!geminiApiKey) {
+      setLangError('no-gemini-key');
+      setLangState('error');
+      return;
+    }
+    setLangState('loading');
+    setLangError('');
+    try {
+      const pack = await generateLanguagePack({ strategy, posts, userApiKey: geminiApiKey });
+      setLangPack(pack);
+      setLangState('ready');
+    } catch (err) {
+      setLangError(err.message || 'Gemini could not build the language pack');
+      setLangState('error');
+    }
+  };
+
+  const handleCopyLanguage = async (langName, data) => {
+    const text = (data.posts || []).map((lp, i) => `POST ${i + 1}\n${lp.hook}\n\n${lp.caption}\n${(lp.hashtags || []).join(' ')}`).join('\n\n----------\n\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedLang(langName);
+      setTimeout(() => setCopiedLang(''), 1600);
+    } catch { /* clipboard blocked */ }
+  };
+
+  // Honest skip-reason classification — the amber banner must NEVER tell a
+  // user with a healthy key to "fix the key" (503/404 are not key problems).
+  const geminiErrRaw = posts.find((p) => p.geminiError)?.geminiError || '';
+  const errKind = /404|no longer available|unavailable for this key/i.test(geminiErrRaw) ? 'model'
+    : /503|overloaded|high demand/i.test(geminiErrRaw) ? 'busy'
+      : /429|quota/i.test(geminiErrRaw) ? 'quota'
+        : /403|restricted|invalid|not valid/i.test(geminiErrRaw) ? 'key'
+          : /MAX_TOKENS/i.test(geminiErrRaw) ? 'maxtok'
+            : 'other';
+  const bannerAdvice = {
+    model: 'Your key is FINE — Google retired that model. The app auto-retried every model your key offers, including any replacement Google named. Tap Regenerate — it re-discovers Google\'s current models automatically.',
+    busy: 'Your key is fine — Gemini servers are just overloaded right now. The Smart Engine output below is ready to post as-is. Tap Regenerate in a minute for full AI-written copy.',
+    quota: 'Free-tier quota (429) is used up for now. The Smart Engine output below is ready to post as-is — wait a minute and tap Regenerate, or add a fresh free key in Settings (⚙️).',
+    key: 'The key was rejected — check it in Settings (⚙️). Get a free one at aistudio.google.com/app/apikey. The Smart Engine output below is still ready to post.',
+    maxtok: 'Gemini hit its output limit mid-write. The app auto-retried with a larger budget — tap Regenerate to run it again. The Smart Engine output below is ready to post.',
+    other: 'Gemini was busy or unavailable even after automatic retries. The Smart Engine output below is ready to post as-is — tap Regenerate in a minute.',
+  }[errKind];
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-500">
       
@@ -760,7 +828,15 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         
         {/* Left Brand Summary */}
         <div className="space-y-1.5 text-left">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={onReset}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white text-[11px] font-bold transition cursor-pointer"
+              title="Back to the URL input — analyze another website"
+            >
+              ← Back / New URL
+            </button>
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
               Live Automated Campaign Ready
@@ -901,16 +977,25 @@ Create a high-converting, photorealistic commercial product advertising hero vis
       </div>
 
       {/* Engine transparency notice — Gemini failure is never silent anymore */}
-      {posts.some((p) => p.geminiError) && (
+      {geminiErrRaw && (
         <div className="mb-3 p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-200">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div>
+          <div className="flex-1">
             <span className="font-semibold text-white">Gemini couldn't write this run: </span>
-            {posts.find((p) => p.geminiError)?.geminiError}
+            {geminiErrRaw}
             <span className="block mt-1 text-amber-300/80">
-              Everything below was written by the built-in Smart Engine and is ready to post as-is.
-              Gemini was busy or unavailable even after automatic retries — tap Regenerate in a minute, or check the key in Settings (⚙️).
+              {bannerAdvice}
             </span>
+            {onRegenerate && (
+              <button
+                type="button"
+                onClick={onRegenerate}
+                disabled={isGeneratingCampaign}
+                className="mt-2.5 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-black shadow-lg shadow-amber-500/25 transition cursor-pointer disabled:opacity-50"
+              >
+                {isGeneratingCampaign ? 'Regenerating…' : '🔁 Regenerate now'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -927,6 +1012,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
             { id: 'instagram', label: 'Instagram' },
             { id: 'linkedin', label: 'LinkedIn' },
             { id: 'twitter', label: 'Twitter / X' },
+            { id: 'languages', label: '🌍 World Languages' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -963,8 +1049,94 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         </div>
       </div>
 
+      {/* World Languages — AI-transcreated multi-market pack */}
+      {activeTab === 'languages' && (
+        <div className="space-y-5">
+          <div className="p-5 rounded-3xl glass-panel border border-indigo-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <p className="font-bold text-white flex items-center gap-2">
+                <Globe className="w-4 h-4 text-indigo-400" />
+                One Campaign, Every Market
+              </p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                Gemini transcreates your 3 hero posts into Hindi, Spanish, French, Arabic &amp; Japanese — native-level phrasing a local marketer would actually post, never robotic translation.
+              </p>
+            </div>
+            {langState !== 'loading' && (
+              <button
+                type="button"
+                onClick={loadLanguages}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 transition cursor-pointer whitespace-nowrap"
+              >
+                {langState === 'ready' ? '🔁 Regenerate Pack' : '🌍 Generate 5-Language Pack'}
+              </button>
+            )}
+          </div>
+
+          {langState === 'loading' && (
+            <div className="p-8 rounded-3xl glass-panel border border-indigo-500/20 text-center">
+              <div className="w-8 h-8 mx-auto border-2 border-indigo-500/30 border-t-indigo-400 rounded-full animate-spin" />
+              <p className="text-sm font-bold text-white mt-3">Gemini is transcreating in 5 languages…</p>
+              <p className="text-xs text-slate-400 mt-1">Hindi · Spanish · French · Arabic · Japanese — usually 10-20 seconds.</p>
+            </div>
+          )}
+
+          {langState === 'error' && (
+            <div className="p-5 rounded-3xl glass-panel border border-amber-500/30 text-xs text-amber-200">
+              {langError === 'no-gemini-key' ? (
+                <>
+                  <p className="font-bold text-white text-sm">🌍 This one runs on real AI</p>
+                  <p className="mt-1.5 text-amber-200/90">World Languages uses your own free Gemini key — add it in Settings (⚙️) (free at aistudio.google.com/app/apikey, takes 30 seconds) and this tab writes native-market copy for your brand. We won't fake it with templates.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-white">Gemini couldn't build the language pack:</p>
+                  <p className="mt-1.5">{langError}</p>
+                  <p className="mt-1.5 text-amber-300/80">Your posts above are unaffected. Try again in a minute — the app auto-retries on Google's newest models.</p>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={loadLanguages}
+                className="mt-3 px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 font-bold transition cursor-pointer"
+              >
+                🔁 Try Again
+              </button>
+            </div>
+          )}
+
+          {langState === 'ready' && langPack && Object.entries(langPack.languages).map(([langName, data]) => (
+            <div key={langName} className="p-5 rounded-3xl glass-panel border border-slate-800/80">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <p className="font-bold text-white flex items-center gap-2">
+                  {langName}
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase">{data.code}</span>
+                  <span className="text-[10px] text-slate-500 font-normal">AI-transcreated · ready to post</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleCopyLanguage(langName, data)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white text-[11px] font-semibold transition cursor-pointer"
+                >
+                  {copiedLang === langName ? (<><Check className="w-3 h-3 text-emerald-400" /> Copied!</>) : (<><Copy className="w-3 h-3" /> Copy {langName} Posts</>)}
+                </button>
+              </div>
+              <div dir={data.code === 'ar' ? 'rtl' : 'ltr'} className="grid md:grid-cols-3 gap-3">
+                {data.posts.map((lp, li) => (
+                  <div key={li} className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 text-xs space-y-2">
+                    <p className="font-bold text-amber-300 leading-snug">{lp.hook}</p>
+                    <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{lp.caption}</p>
+                    <p className="text-indigo-300">{(lp.hashtags || []).join(' ')}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Grid View */}
-      {viewMode === 'grid' && (
+      {activeTab !== 'languages' && viewMode === 'grid' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredPosts.map((post) => {
             const isVideo = post.contentType?.includes('Video');
@@ -1298,7 +1470,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
       )}
 
       {/* Timeline / Calendar View */}
-      {viewMode === 'calendar' && (
+      {activeTab !== 'languages' && viewMode === 'calendar' && (
         <div className="space-y-4">
           {filteredPosts.map((post, idx) => (
             <div

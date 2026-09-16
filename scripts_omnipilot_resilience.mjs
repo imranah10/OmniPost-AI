@@ -214,22 +214,108 @@ postLog = [];
 }
 
 // ========================================================================
-section('E) 429 forever → full chain exhausted → honest quota error');
+section('E) 429 forever → 3-model fleet cap → honest quota error');
 postLog = [];
 {
   postResponses = [];
-  for (let i = 0; i < 12; i++) postResponses.push(() => genErr(429, 'Rate limited'));
+  for (let i = 0; i < 10; i++) postResponses.push(() => genErr(429, 'Rate limited'));
   const t0 = Date.now();
   const res = await ai.testGeminiKey('FAKE_KEY_E');
   const elapsed = Date.now() - t0;
   const posts = postLog.filter((p) => p.url.includes(':generateContent'));
   check('fails honestly after exhausting retries', res.ok === false, JSON.stringify(res));
   check('error mentions 429 + auto-retried', /429/.test(res.error) && /auto-retried/i.test(res.error), res.error);
-  check('walked 4 models × 3 attempts = 12 calls', posts.length === 12, `got ${posts.length}`);
-  console.log(`  ⏱ elapsed ${Math.round(elapsed / 1000)}s`);
+  check('walked exactly 3 models × 3 attempts = 9 calls (fleet cap)', posts.length === 9, `got ${posts.length}`);
+  const modelsTried = [...new Set(posts.map((p) => p.url.match(/models\/([^:]+):/)?.[1]))];
+  check('walked 3 DISTINCT models', modelsTried.length === 3, modelsTried.join(', '));
+  console.log(`  ⏱ elapsed ${Math.round(elapsed / 1000)}s, models: ${modelsTried.join(' → ')}`);
 }
 
 // ========================================================================
+section('F) STALE-MODEL 404 → Google names replacement → chain SELF-HEALS (live-bug repro)');
+postLog = [];
+{
+  // Simulate a 2026 key whose ListModels only lists RETIRED models — the exact
+  // user bug: "gemini-2.0-flash-lite is no longer available... use models/
+  // gemini-3.5-flash-lite". The OLD code walked a hardcoded stale chain and
+  // died; the new code extracts the suggested model from the 404 body.
+  globalThis.fetch = async (url, opts = {}) => {
+    const method = (opts.method || 'GET').toUpperCase();
+    if (method === 'GET') {
+      return { ok: true, status: 200, json: async () => ({
+        models: [
+          { name: 'models/gemini-2.0-flash', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/gemini-2.0-flash-lite', supportedGenerationMethods: ['generateContent'] },
+        ],
+      }) };
+    }
+    const body = JSON.parse(opts.body || '{}');
+    postLog.push({ url, body });
+    const model = String(url).match(/models\/([^:]+):generateContent/)?.[1] || '';
+    if (model === 'gemini-3.5-flash-lite') {
+      return { ok: true, status: 200, json: async () => ({
+        candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }],
+      }) };
+    }
+    return { ok: false, status: 404, json: async () => ({ error: { code: 404, message: `This model models/${model} is no longer available. Please update your code to use models/gemini-3.5-flash-lite for the latest features.` } }) };
+  };
+
+  const res = await ai.testGeminiKey('FAKE_KEY_F');
+  const posts = postLog.filter((p) => p.url.includes(':generateContent'));
+  const modelsTried = posts.map((p) => p.url.match(/models\/([^:]+):/)?.[1]);
+  check('call SUCCEEDS via Google-suggested model', res.ok === true, JSON.stringify(res));
+  check('1st attempt = stale gemini-2.0-flash (discovery best)', modelsTried[0] === 'gemini-2.0-flash', modelsTried[0]);
+  check('2nd attempt = gemini-3.5-flash-lite extracted from 404 body', modelsTried[1] === 'gemini-3.5-flash-lite', modelsTried[1]);
+  check('only 2 attempts total (no wasted retries)', posts.length === 2, `got ${posts.length}`);
+  console.log(`  chain: ${modelsTried.join(' → ')}`);
+}
+
+// ========================================================================
+section('G) discovery-first — newest generation model picked BEFORE legacy names');
+postLog = [];
+{
+  globalThis.fetch = async (url, opts = {}) => {
+    const method = (opts.method || 'GET').toUpperCase();
+    if (method === 'GET') {
+      return { ok: true, status: 200, json: async () => ({
+        models: [
+          { name: 'models/gemini-2.0-flash', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/gemini-3.5-flash', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+        ],
+      }) };
+    }
+    const body = JSON.parse(opts.body || '{}');
+    postLog.push({ url, body });
+    return { ok: true, status: 200, json: async () => ({
+      candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }],
+    }) };
+  };
+
+  const res = await ai.testGeminiKey('FAKE_KEY_G');
+  const posts = postLog.filter((p) => p.url.includes(':generateContent'));
+  const firstModel = posts[0]?.url.match(/models\/([^:]+):/)?.[1] || '';
+  check('key test succeeds', res.ok === true, JSON.stringify(res));
+  check('first attempt = gemini-3.5-flash (newest, not 2.0 legacy)', firstModel === 'gemini-3.5-flash', firstModel);
+  check('single attempt — no fallback churn', posts.length === 1, `got ${posts.length}`);
+}
+
+// ========================================================================
+// NOTE: scenarios F & G reassign globalThis.fetch with stateful responders.
+// Restore the queue-based stub for any future scenarios appended below.
+globalThis.fetch = async (url, opts = {}) => {
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method === 'GET') {
+    return { ok: true, status: 200, json: async () => MODELS_OK };
+  }
+  const body = JSON.parse(opts.body || '{}');
+  postLog.push({ url, body });
+  const responder = postResponses.shift();
+  if (!responder) throw new Error('fetch-stub: no more queued POST responses');
+  const r = responder(body);
+  return { ok: r.status === 200, status: r.status, json: async () => r.json };
+};
+
 rmSync(TMP, { recursive: true, force: true });
 console.log(`\n========================================`);
 console.log(`RESILIENCE E2E: ${pass} passed, ${fail} failed`);

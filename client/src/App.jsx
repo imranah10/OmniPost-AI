@@ -202,6 +202,15 @@ export default function App() {
     }
   };
 
+  // One-tap Regenerate — re-runs the full copy generation with the SAME plan
+  const handleRegenerate = () => {
+    if (isGeneratingCampaign) return;
+    handleConfirmGeneration({
+      days: strategy?.recommendedDays || 14,
+      totalPosts: strategy?.recommendedPostCount || 10,
+    });
+  };
+
   const handleReset = () => {
     setStep('input');
     setWebsiteData(null);
@@ -280,6 +289,9 @@ export default function App() {
             masterVideoPrompt={masterVideoPrompt}
             masterBlueprint={masterBlueprint}
             higgsfieldApiKey={keys.higgsfieldApiKey}
+            geminiApiKey={keys.geminiApiKey}
+            onRegenerate={handleRegenerate}
+            isGeneratingCampaign={isGeneratingCampaign}
             onReset={handleReset}
           />
         )}

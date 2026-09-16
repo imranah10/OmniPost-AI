@@ -15,16 +15,25 @@
  * 404 walk a fallback chain automatically.
  */
 const MODEL_CACHE_KEY = 'omnipost_gemini_model';
+// 2026-era chain FIRST — Google retires old models constantly (e.g.
+// "gemini-2.0-flash-lite is no longer available. Please update your code to
+// use models/gemini-3.5-flash-lite"). Newer names first so fresh keys get the
+// best model; retired names stay at the tail as harmless legacy fallbacks.
 const MODEL_CHAIN = [
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3-flash',
   'gemini-flash-latest',
-  'gemini-2.0-flash-lite',
+  'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
   'gemini-2.5-pro',
   'gemini-pro-latest',
   'gemini-1.5-flash',
 ];
+// Hard cap on distinct models tried in one call — keeps worst-case latency sane.
+const MAX_MODELS_TO_TRY = 8;
 const BAD_MODEL_KIND = /embedding|aqa|imagen|veo|tts|native-audio|live|audio|thinking-exp|robotics|computer-use/i;
 
 const geminiCache = {
@@ -63,16 +72,65 @@ async function listKeyModels(apiKey, timeoutMs = 15000) {
   }
 }
 
+/** Newer generations first (3.5 > 3 > 2.5 > 2.0 > 1.5), full flash before lite. */
+function modelVersion(m) {
+  const v = parseFloat(String(m).match(/gemini-(\d+(?:\.\d+)?)/)?.[1]);
+  return Number.isFinite(v) ? v : 0;
+}
+function rankAvailable(list) {
+  return [...list].sort((a, b) => {
+    const va = modelVersion(a);
+    const vb = modelVersion(b);
+    if (vb !== va) return vb - va;
+    const la = /lite/.test(a) ? 1 : 0;
+    const lb = /lite/.test(b) ? 1 : 0;
+    if (la !== lb) return la - lb;
+    return a.length - b.length;
+  });
+}
+
 /** Pick the best model from the key's own available list. */
 function pickBestModel(available) {
   for (const pref of MODEL_CHAIN) {
     if (available.includes(pref)) return pref;
   }
-  const flashes = available.filter((m) => m.includes('flash'));
-  if (flashes.length) return flashes.sort((a, b) => a.length - b.length)[0];
-  const pros = available.filter((m) => m.includes('pro'));
-  if (pros.length) return pros.sort((a, b) => a.length - b.length)[0];
-  return available[0] || '';
+  const ranked = rankAvailable(available);
+  return ranked.find((m) => m.includes('flash'))
+    || ranked.find((m) => m.includes('pro'))
+    || ranked[0]
+    || '';
+}
+
+/**
+ * FULL walk order for one call: cached winner → key's own best → 2026 static
+ * chain → every other model the key can actually call. Retired hardcoded names
+ * can no longer blind us: the key's live ListModels output is IN the chain.
+ */
+async function buildModelChain(apiKey) {
+  const chain = [];
+  const push = (m) => { if (m && !chain.includes(m)) chain.push(m); };
+  push(geminiCache.get()); // last known-good model first
+  const available = apiKey ? await listKeyModels(apiKey) : null;
+  if (available && available.length) push(pickBestModel(available));
+  for (const m of MODEL_CHAIN) push(m);
+  if (available && available.length) rankAvailable(available).forEach(push);
+  return chain.slice(0, MAX_MODELS_TO_TRY);
+}
+
+/**
+ * Google's 404 body literally NAMES the replacement model:
+ *   "...use models/gemini-3.5-flash-lite for the latest features"
+ * Extract it (from the RAW, untruncated detail) and try it next — the chain
+ * heals itself from Google's own error message.
+ */
+function extractSuggestedModel(rawDetail, retiredModel) {
+  const msg = String(rawDetail || '');
+  const named = msg.match(/use\s+models\/([a-z0-9][a-z0-9.\-]+)/i)?.[1];
+  if (named && named !== retiredModel && !BAD_MODEL_KIND.test(named)) return named;
+  for (const hit of msg.matchAll(/models\/([a-z0-9][a-z0-9.\-]+)/gi)) {
+    if (hit[1] && hit[1] !== retiredModel && !BAD_MODEL_KIND.test(hit[1])) return hit[1];
+  }
+  return '';
 }
 
 /**
@@ -91,6 +149,55 @@ export async function resolveGeminiModel(apiKey) {
     }
   }
   return MODEL_CHAIN[0];
+}
+
+/**
+ * Multi-language campaign pack — one resilient Gemini call translates +
+ * culturally adapts the campaign's hero posts into 5 world languages.
+ * Throws honestly on failure (caller shows a truthful notice, never fake text).
+ */
+export async function generateLanguagePack({ strategy, posts, userApiKey }) {
+  if (!userApiKey) throw new Error('no-gemini-key');
+  const heroPosts = (posts || []).slice(0, 3).map((p, i) => (
+    `POST ${i + 1} (${p.contentType || 'Image Post'} for ${p.platform || 'Instagram'}):\nHook: ${p.hook || ''}\nCaption: ${String(p.caption || '').slice(0, 700)}\nCTA: ${p.callToAction || ''}`
+  )).join('\n\n');
+  const prompt = `You are a world-class transcreation specialist. Localize (NOT word-by-word translate — culturally ADAPT like a native social media manager) this social media campaign into exactly these 5 languages: Hindi (Devanagari script), Spanish, French, Arabic (RTL), Japanese.
+
+BRAND: ${strategy?.brandName || 'Brand'}
+INDUSTRY: ${strategy?.industry || ''}
+TONE: ${strategy?.brandTone || 'Bold, modern'}
+WEBSITE: ${strategy?.domain || ''}
+
+${heroPosts}
+
+RULES:
+- Keep brand name and the website URL in English/latin script.
+- Captions keep the punchy hook-first structure; 2-4 lines each.
+- 3 hashtags per language: keep 1 English brand tag, add 2 native-language tags.
+- Use authentic native phrasing a local marketer would actually post — never robotic translation.
+
+Return ONLY valid JSON:
+{"languages":{"Hindi":{"code":"hi","posts":[{"hook":"...","caption":"...","hashtags":["#..."]}]},"Spanish":{"code":"es",...},"French":{"code":"fr",...},"Arabic":{"code":"ar",...},"Japanese":{"code":"ja",...}}}
+Each language MUST have exactly 3 posts.`;
+  const raw = await geminiText(userApiKey, prompt, 120000, { json: true, maxTokens: 8192 });
+  const parsed = parseJsonLoose(raw);
+  const langs = parsed?.languages;
+  if (!langs || typeof langs !== 'object') throw new Error('Gemini response was not a valid language pack');
+  const out = {};
+  for (const [name, val] of Object.entries(langs)) {
+    const plist = Array.isArray(val?.posts) ? val.posts : [];
+    if (!plist.length) continue;
+    out[name] = {
+      code: String(val.code || '').slice(0, 8),
+      posts: plist.slice(0, 3).map((p) => ({
+        hook: String(p.hook || '').slice(0, 200),
+        caption: String(p.caption || '').slice(0, 2200),
+        hashtags: (Array.isArray(p.hashtags) ? p.hashtags : []).slice(0, 6).map((h) => String(h)),
+      })),
+    };
+  }
+  if (Object.keys(out).length < 2) throw new Error('Gemini returned fewer than 2 usable languages');
+  return { languages: out, engine: 'gemini' };
 }
 
 export function parseJsonLoose(text) {
@@ -128,7 +235,7 @@ async function geminiError(res, preDetail = '') {
   if (res.status === 429) return 'Gemini free-tier quota exhausted (429) — auto-retried, still rate-limited. Wait a minute and regenerate, or use a new key';
   if (res.status === 500) return 'Gemini server error (500) — auto-retried, still failing. Try again in a moment';
   if (res.status === 503) return 'Gemini is overloaded (503 — high demand on Google\'s side). Auto-retried 3×, still busy — try Regenerate again in a minute';
-  if (res.status === 404) return `Gemini model unavailable for this key/region (404)${detail ? `: ${detail.slice(0, 140)}` : ''} — auto-retrying other models…`;
+  if (res.status === 404) return `Gemini model unavailable for this key/region (404)${detail ? `: ${detail.slice(0, 220)}` : ''} — auto-retrying other models…`;
   return `Gemini error ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`;
 }
 
@@ -147,7 +254,11 @@ async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = fals
       maxOutputTokens: maxTokens,
       ...(json ? { responseMimeType: 'application/json' } : {}),
     };
-    if (!noThinking && /2\.5-flash/.test(model)) {
+    // 3.x/2.5 flash models "think" by default and hidden thinking tokens burn
+    // the output budget (root cause of MAX_TOKENS empty output). Disable for
+    // every flash-generation model; models that reject the config are retried
+    // without it (thinkingRejected path below).
+    if (!noThinking && /flash/.test(model)) {
       generationConfig.thinkingConfig = { thinkingBudget: 0 };
     }
     const res = await fetch(url, {
@@ -164,6 +275,8 @@ async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = fals
       try { preDetail = (await res.json())?.error?.message || ''; } catch { /* keep empty */ }
       const err = new Error(await geminiError(res, preDetail));
       err.geminiStatus = res.status;
+      // Raw (untruncated) detail → Google may name the replacement model here
+      err.suggestedModel = res.status === 404 ? extractSuggestedModel(preDetail, model) : '';
       if (res.status === 404) err.modelNotFound = true; // walk the chain
       if (res.status === 429 || res.status === 500 || res.status === 503) err.retryable = true;
       if (res.status === 400 && /thinking/i.test(preDetail)) err.thinkingRejected = true;
@@ -200,26 +313,36 @@ async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = fals
 
 /**
  * Resilient Gemini text call — survives everything Google can throw at it:
+ *  • 404 (model retired per key/region) → walk the chain, AND if Google's error
+ *    names a replacement model ("use models/gemini-3.5-flash-lite") try THAT next
  *  • 429/500/503 (quota & "high demand") → exponential-backoff retries per model
  *  • MAX_TOKENS empty output → same model retried with a DOUBLED token budget
- *  • 404 (model retired per key/region) → walk to the next model in the chain
  *  • thinkingConfig rejected → automatically retried without it
  * Only truly fatal errors (invalid/restricted key, safety block, timeout) fail fast.
  */
 async function geminiText(apiKey, prompt, timeoutMs = 60000, opts = {}) {
   if (!apiKey) throw new Error('no-gemini-key');
   geminiCache.clear(); // a stale cached model can 404 after Google retires it
-  const primary = await resolveGeminiModel(apiKey);
-  const chain = [primary, ...MODEL_CHAIN.filter((m) => m !== primary)].slice(0, 4);
+  const queue = await buildModelChain(apiKey); // discovery-first + 2026 names
   let lastErr;
-  for (const model of chain) {
+  let retryableFleets = 0; // models whose 3 retryable attempts all failed
+  const tried = new Set();
+  while (queue.length && tried.size < MAX_MODELS_TO_TRY) {
+    const model = queue.shift();
+    if (!model || tried.has(model)) continue;
+    tried.add(model);
     let budget = opts.maxTokens || 8192;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         return await generateWithModel(apiKey, model, prompt, timeoutMs, { ...opts, maxTokens: budget });
       } catch (err) {
         lastErr = err;
-        if (err.modelNotFound) break;            // retired for this key → next model
+        if (err.modelNotFound) {
+          // Google TOLD us the successor — put it at the FRONT of the queue
+          const sug = err.suggestedModel || extractSuggestedModel(err.message, model);
+          if (sug && !tried.has(sug)) queue.unshift(sug);
+          break;                            // retired for this key → next model
+        }
         if (!err.retryable || attempt === 2) break; // fatal, or retries exhausted
         await sleep(1200 * (attempt + 1) + Math.round(Math.random() * 700)); // ≈1.2s, 2.6s
         if (err.maxTokensIssue) budget *= 2;     // give the answer more room
@@ -228,9 +351,15 @@ async function geminiText(apiKey, prompt, timeoutMs = 60000, opts = {}) {
     if (lastErr && !lastErr.modelNotFound && !lastErr.retryable) {
       throw lastErr; // invalid key / safety / timeout — another model won't help
     }
-    // retryable-exhausted OR model-retired → fall through to the next model
+    if (!lastErr?.modelNotFound) {
+      retryableFleets += 1;
+      // 3 different models all 429/503 after full backoff → the whole fleet is
+      // rate-limiting this key; walking further would just waste minutes.
+      if (retryableFleets >= 3) throw lastErr;
+    }
+    // model-retired OR retryable-exhausted → fall through to the next model
   }
-  throw lastErr;
+  throw lastErr || new Error('Gemini unavailable — no callable model found for this key');
 }
 
 /** Instant key health-check for the Settings "Test Key" button. */
@@ -294,7 +423,7 @@ Return ONLY a valid JSON object:
   "primaryPlatforms": ["Instagram", "LinkedIn", "Twitter/X", "TikTok"]
 }`;
 
-      const raw = await geminiText(userApiKey, prompt, 60000, { json: true, maxTokens: 2048 });
+      const raw = await geminiText(userApiKey, prompt, 60000, { json: true, maxTokens: 4096 });
       const parsed = parseJsonLoose(raw);
       if (parsed && parsed.brandName) {
         const defaultPosts = isStudioPlatform && toolsCount > 30 ? 18 : studiosCount >= 6 ? 9 : 6;
