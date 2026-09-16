@@ -25,7 +25,7 @@ await page.locator('button:has-text("Auto-Pilot")').first().click();
 
 // wait strategy
 let strategyOk = false;
-for (let i = 0; i < 40; i++) {
+for (let i = 0; i < 100; i++) {
   await page.waitForTimeout(3000);
   const body = await page.locator('body').innerText();
   if (/Accept.*Plan|Generate All/i.test(body)) { strategyOk = true; break; }
@@ -37,7 +37,7 @@ await acceptBtn.click();
 
 // wait campaign
 let campaignOk = false;
-for (let i = 0; i < 40; i++) {
+for (let i = 0; i < 60; i++) {
   await page.waitForTimeout(3000);
   const body = await page.locator('body').innerText();
   if (/Export Full Campaign/i.test(body) && /Day 1/i.test(body)) { campaignOk = true; break; }

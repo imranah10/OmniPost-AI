@@ -56,23 +56,44 @@ async function withTimeout(promise, ms) {
 }
 
 /** Fetch a cross-origin HTML/text payload through the proxy chain. */
-export async function proxyText(url, { timeout = 15000 } = {}) {
-  for (const make of TEXT_PROXIES) {
+async function fetchTextVia(make, url, timeout) {
+  const res = await withTimeout(fetch(make(url), { redirect: 'follow' }), timeout);
+  if (!res.ok) throw new Error(String(res.status));
+  let text = await res.text();
+  // allorigins /get wraps the payload in JSON { contents: "..." }
+  if (text.startsWith('{"contents"')) {
     try {
-      const res = await withTimeout(fetch(make(url), { redirect: 'follow' }), timeout);
-      if (!res.ok) continue;
-      let text = await res.text();
-      // allorigins /get wraps the payload in JSON { contents: "..." }
-      if (text.startsWith('{"contents"')) {
-        try {
-          text = JSON.parse(text).contents || '';
-        } catch {
-          /* keep raw */
-        }
-      }
-      if (text && text.length > 200) return text;
+      text = JSON.parse(text).contents || '';
     } catch {
-      /* try next proxy */
+      /* keep raw */
+    }
+  }
+  if (!text || text.length <= 200) throw new Error('empty');
+  return text;
+}
+
+export async function proxyText(url, { timeout = 15000 } = {}) {
+  // 1) same-origin function (Vercel deploy) — definitive, try alone first
+  try {
+    return await fetchTextVia(TEXT_PROXIES[0], url, timeout);
+  } catch {
+    /* fall through */
+  }
+  // 2) race the healthy public proxies — first success wins (defeats single-
+  //    service rate limits; the losers are aborted by the overall timeout)
+  try {
+    return await Promise.any(
+      [TEXT_PROXIES[1], TEXT_PROXIES[2], TEXT_PROXIES[3]].map((m) => fetchTextVia(m, url, timeout))
+    );
+  } catch {
+    /* fall through */
+  }
+  // 3) remaining fallbacks, sequential
+  for (const make of TEXT_PROXIES.slice(4)) {
+    try {
+      return await fetchTextVia(make, url, timeout);
+    } catch {
+      /* next */
     }
   }
   return null;
