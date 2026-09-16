@@ -16,6 +16,18 @@
  * gracefully instead of crashing the flow.
  */
 
+/**
+ * Static-host detection — GH Pages (and any static host) has NO serverless
+ * backend, so /api/proxy always 404s there. Calling it anyway produced the
+ * scary "failed to load resource: 404" console noise users reported, plus a
+ * wasted round-trip on every fetch. We skip it entirely on github.io and
+ * auto-disable it the first time it 404s (covers any other static host).
+ */
+let sameOriginProxyDead = typeof location !== 'undefined' && /\.github\.io$/.test(location.hostname);
+function noteSameOriginResult(err) {
+  if (err && /^404/.test(String(err.message || err))) sameOriginProxyDead = true;
+}
+
 const TEXT_PROXIES = [
   (u) => `/api/proxy?url=${encodeURIComponent(u)}`, // same-origin Vercel function (deployed with the site)
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
@@ -41,9 +53,13 @@ const IMAGE_PROXIES = [
 const isMshots = (u) => /s\.wordpress\.com\/mshots/.test(u);
 const isPollinations = (u) => /image\.pollinations\.ai/.test(u);
 const imageChain = (u) => {
-  if (isPollinations(u)) return [IMAGE_PROXIES[1], IMAGE_PROXIES[2], IMAGE_PROXIES[0]]; // direct → wsrv → same-origin
-  if (isMshots(u)) return [IMAGE_PROXIES[0], IMAGE_PROXIES[2], IMAGE_PROXIES[3]]; // same-origin → wsrv → allorigins
-  return IMAGE_PROXIES;
+  const so = IMAGE_PROXIES[0];
+  const chain = isPollinations(u)
+    ? [IMAGE_PROXIES[1], IMAGE_PROXIES[2], so] // direct → wsrv → same-origin
+    : isMshots(u)
+      ? [so, IMAGE_PROXIES[2], IMAGE_PROXIES[3]] // same-origin → wsrv → allorigins
+      : IMAGE_PROXIES;
+  return sameOriginProxyDead ? chain.filter((m) => m !== so) : chain;
 };
 
 async function withTimeout(promise, ms) {
@@ -78,11 +94,16 @@ async function fetchTextVia(make, url, timeout) {
 }
 
 export async function proxyText(url, { timeout = 15000 } = {}) {
-  // 1) same-origin function (Vercel deploy) — definitive, try alone first
-  try {
-    return await fetchTextVia(TEXT_PROXIES[0], url, timeout);
-  } catch {
-    /* fall through */
+  // 1) same-origin function (Vercel deploy) — definitive, try alone first.
+  //    Skipped entirely on static hosts (github.io) — there is no backend,
+  //    so calling it would only produce a guaranteed 404.
+  if (!sameOriginProxyDead) {
+    try {
+      return await fetchTextVia(TEXT_PROXIES[0], url, timeout);
+    } catch (err) {
+      noteSameOriginResult(err); // first 404 on a static host → never again
+      /* fall through */
+    }
   }
   // 2) race the healthy public proxies — first success wins (defeats single-
   //    service rate limits; the losers are aborted by the overall timeout).
@@ -214,8 +235,10 @@ export async function captureScreenshot(pageUrl, { w = 1280, h = 800, retries = 
   for (let i = 0; i < retries; i++) {
     await new Promise((r) => setTimeout(r, 1000 + i * 3500));
     // canvas-safe loads: same-origin proxy first, then wsrv.nl (both send CORS)
-    const viaProxy = await preloadImage(`/api/proxy?url=${encodeURIComponent(url)}&cb=${Date.now()}`, { cors: true, timeout: 20000 });
-    if (viaProxy && viaProxy.naturalWidth >= w * 0.6) return viaProxy;
+    if (!sameOriginProxyDead) {
+      const viaProxy = await preloadImage(`/api/proxy?url=${encodeURIComponent(url)}&cb=${Date.now()}`, { cors: true, timeout: 20000 });
+      if (viaProxy && viaProxy.naturalWidth >= w * 0.6) return viaProxy;
+    }
     const viaWsrv = await preloadImage(`${wsrvUrl(url)}&cb=${Date.now()}`, { cors: true, timeout: 20000 });
     if (viaWsrv && viaWsrv.naturalWidth >= w * 0.6) return viaWsrv;
   }

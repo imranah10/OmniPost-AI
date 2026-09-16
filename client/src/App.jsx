@@ -39,6 +39,15 @@ export default function App() {
   const [engineMode, setEngineMode] = useState('auto'); // 'server' | 'standalone'
   const [liveStep, setLiveStep] = useState(null);
   const [genProgress, setGenProgress] = useState(null);
+  // ASTRA MODE — full autonomy: deep-crawl every page, auto-accept the plan,
+  // auto-generate the entire campaign. Zero clicks after the URL (default ON).
+  const [astraMode, setAstraMode] = useState(() => {
+    try { return localStorage.getItem('omnipost_astra') !== 'off'; } catch { return true; }
+  });
+  const toggleAstra = (on) => {
+    setAstraMode(on);
+    try { localStorage.setItem('omnipost_astra', on ? 'on' : 'off'); } catch {}
+  };
 
   const handleSaveKeys = (newKeys) => {
     setKeys(newKeys);
@@ -229,6 +238,8 @@ export default function App() {
           <UrlInputSection
             onStartAnalysis={handleStartAnalysis}
             isLoading={false}
+            astraMode={astraMode}
+            onToggleAstra={toggleAstra}
           />
         )}
 
@@ -246,6 +257,7 @@ export default function App() {
             strategy={strategy}
             onConfirmGeneration={handleConfirmGeneration}
             isGeneratingCampaign={isGeneratingCampaign}
+            astraMode={astraMode}
           />
         )}
 

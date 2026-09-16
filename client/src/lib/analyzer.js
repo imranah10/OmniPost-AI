@@ -221,7 +221,7 @@ function healthReport(pages, hasHttps) {
   return { score: Math.min(100, score), label: score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : 'Needs Work' };
 }
 
-export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 } = {}) {
+export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 13 } = {}) {
   const url = normalizeUrl(targetUrl);
   if (!url) throw new Error('Invalid URL');
   const uObj = new URL(url);
@@ -280,10 +280,14 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 }
   onStep({ key: 'structure', label: 'Mapping studios, tools & capabilities…', progress: 55 });
   const structure = deriveStructure(pages, domain);
 
-  onStep({ key: 'screenshots', label: 'Capturing live page screenshots…', progress: 68 });
+  onStep({ key: 'screenshots', label: `Astra: capturing ALL ${interesting.length + 1} pages…`, progress: 68 });
+  // ASTRA total capture — every crawled page gets a live screenshot, not just
+  // the first four. The homepage capture is awaited (needed for the brand
+  // palette); every other page is warmed upstream in a gentle stagger so
+  // mShots has time to generate before posts/ZIP fetch them.
   const shotTargets = [
     { url, title: home.title || 'Landing Page', description: home.description || 'Hero & full platform view' },
-    ...interesting.slice(0, 4).map((l) => ({
+    ...interesting.map((l) => ({
       url: l.href,
       title: l.name,
       description: `Live capture of ${l.href.replace(origin, '') || '/'} `,
@@ -310,7 +314,9 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 }
       });
     } else {
       const shotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(t.url)}?w=1280&h=800`;
-      preloadImage(shotUrl, { cors: false, timeout: 12000 }).catch(() => {});
+      setTimeout(() => {
+        preloadImage(shotUrl, { cors: false, timeout: 12000 }).catch(() => {});
+      }, i * 350); // stagger — be gentle with the free screenshot service
       screenshots.push({
         webUrl: shotUrl,
         localName: fname,
