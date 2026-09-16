@@ -13,6 +13,7 @@
  */
 import {
   proxyText,
+  waybackText,
   captureScreenshot,
   preloadImage,
   extractPaletteFromImage,
@@ -154,8 +155,14 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 }
   const origin = uObj.origin;
 
   onStep({ key: 'crawl', label: `Crawling ${domain}…`, progress: 8 });
-  const homeHtml = await proxyText(url);
-  if (!homeHtml) throw new Error('Could not reach the website through any proxy. Check the URL or try again.');
+  let homeHtml = await proxyText(url);
+  if (!homeHtml) {
+    onStep({ key: 'crawl2', label: 'Trying archive fallback…', progress: 12 });
+    homeHtml = await waybackText(url);
+  }
+  if (!homeHtml) {
+    throw new Error('Could not reach the website through any proxy. Check the URL or try again.');
+  }
 
   onStep({ key: 'parse', label: 'Extracting brand DNA & structure…', progress: 25 });
   const home = parseHtml(homeHtml, url);

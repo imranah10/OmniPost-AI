@@ -16,6 +16,7 @@ const TEXT_PROXIES = [
   (u) => `https://test.cors.workers.dev/?${u}`,
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, // JSON-wrapped variant
 ];
 
 const IMAGE_PROXIES = [
@@ -59,7 +60,15 @@ export async function proxyText(url, { timeout = 15000 } = {}) {
     try {
       const res = await withTimeout(fetch(make(url), { redirect: 'follow' }), timeout);
       if (!res.ok) continue;
-      const text = await res.text();
+      let text = await res.text();
+      // allorigins /get wraps the payload in JSON { contents: "..." }
+      if (text.startsWith('{"contents"')) {
+        try {
+          text = JSON.parse(text).contents || '';
+        } catch {
+          /* keep raw */
+        }
+      }
       if (text && text.length > 200) return text;
     } catch {
       /* try next proxy */
@@ -164,6 +173,22 @@ export async function extractPaletteFromImage(img) {
   } catch {
     return DEFAULT;
   }
+}
+
+/** Last-resort text fetch via the Wayback Machine (CORS-enabled, may be slow). */
+export async function waybackText(url, { timeout = 45000 } = {}) {
+  try {
+    const res = await withTimeout(
+      fetch(`https://web.archive.org/web/2026/${url}`, { redirect: 'follow' }),
+      timeout
+    );
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (text && text.length > 200) return text;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function normalizeUrl(u) {
