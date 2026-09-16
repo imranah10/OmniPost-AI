@@ -161,7 +161,9 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 6 }
     homeHtml = await waybackText(url);
   }
   if (!homeHtml) {
-    throw new Error('Could not reach the website through any proxy. Check the URL or try again.');
+    throw new Error(
+      'Free public proxies are busy or blocked right now. Please retry in a minute — or deploy this app on Vercel so it gets its own built-in same-origin proxy (100% reliable).'
+    );
   }
 
   onStep({ key: 'parse', label: 'Extracting brand DNA & structure…', progress: 25 });

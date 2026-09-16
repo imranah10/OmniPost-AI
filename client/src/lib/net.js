@@ -80,13 +80,16 @@ export async function proxyText(url, { timeout = 15000 } = {}) {
     /* fall through */
   }
   // 2) race the healthy public proxies — first success wins (defeats single-
-  //    service rate limits; the losers are aborted by the overall timeout)
-  try {
-    return await Promise.any(
-      [TEXT_PROXIES[1], TEXT_PROXIES[2], TEXT_PROXIES[3]].map((m) => fetchTextVia(m, url, timeout))
-    );
-  } catch {
-    /* fall through */
+  //    service rate limits; the losers are aborted by the overall timeout).
+  //    Two rounds: free proxies rate-limit in bursts, a short retry recovers.
+  for (let round = 0; round < 2; round++) {
+    try {
+      return await Promise.any(
+        [TEXT_PROXIES[1], TEXT_PROXIES[2], TEXT_PROXIES[3]].map((m) => fetchTextVia(m, url, timeout))
+      );
+    } catch {
+      if (round === 0) await new Promise((r) => setTimeout(r, 3000));
+    }
   }
   // 3) remaining fallbacks, sequential
   for (const make of TEXT_PROXIES.slice(4)) {
