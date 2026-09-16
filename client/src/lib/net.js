@@ -14,6 +14,7 @@
 const TEXT_PROXIES = [
   (u) => `/api/proxy?url=${encodeURIComponent(u)}`, // same-origin Vercel function (deployed with the site)
   (u) => `https://test.cors.workers.dev/?${u}`,
+  (u) => `https://api.cors.lol/?url=${u}`,
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, // JSON-wrapped variant
