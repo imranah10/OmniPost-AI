@@ -24,8 +24,7 @@ import {
   Globe,
   Wand2,
   Loader2,
-  Clapperboard,
-  Square
+  Clapperboard
 } from 'lucide-react';
 import { generateLanguagePack } from '../lib/aiClient.js';
 import { generateAIImage, generateAIVideo, cleanPrompt } from '../lib/aiMedia.js';
@@ -162,7 +161,6 @@ export default function CampaignDashboard({
   const [copiedPromptKey, setCopiedPromptKey] = useState(null);
   const [expandedPromptPostId, setExpandedPromptPostId] = useState(null);
   const [isExportingZip, setIsExportingZip] = useState(false);
-  const [isDownloadingScreenshotsZip, setIsDownloadingScreenshotsZip] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'calendar'
   const [mediaViewMode, setMediaViewMode] = useState({}); // { [postId]: 'poster' | 'ai' | 'screenshot' }
   const [carouselPost, setCarouselPost] = useState(null);
@@ -173,10 +171,10 @@ export default function CampaignDashboard({
 
   // === REAL AI media generation (Gemini image models + Google Veo) ===
   // aiMedia[postId] = { phase, imgUrl, imgModel, imgError, vidUrl, vidModel, vidError, status }
+  // Prompts-first: every post always ships a copy-paste prompt; manual per-post
+  // generation stays available for keyed users — NO mass auto-queue anymore.
   const [aiMedia, setAiMedia] = useState({});
   const aiMediaRef = useRef({});
-  const [bulkVisual, setBulkVisual] = useState({ running: false, done: 0, total: 0 });
-  const bulkCancelRef = useRef(false);
   const inFlightRef = useRef({});
 
   const updateMedia = (postId, patch) => {
@@ -204,7 +202,8 @@ export default function CampaignDashboard({
       updateMedia(post.id, { phase: 'img-done', imgUrl: dataUrl, imgModel: model, status: '' });
       return true;
     } catch (err) {
-      updateMedia(post.id, { phase: 'img-error', imgError: err.message || 'Image generation failed' });
+      const raw = err.message || 'Image generation failed';
+      updateMedia(post.id, { phase: 'img-error', imgError: `${raw} — no worries: Copy Image Prompt above and paste it into the Gemini app / ChatGPT / Midjourney to make this visual yourself.` });
       return false;
     } finally {
       delete inFlightRef.current[`${post.id}:img`];
@@ -233,24 +232,6 @@ export default function CampaignDashboard({
     } finally {
       delete inFlightRef.current[`${post.id}:vid`];
     }
-  };
-
-  // One-tap Visualize All — every post gets its own UNIQUE AI image (sequential queue)
-  const handleVisualizeAll = async () => {
-    if (bulkVisual.running) {
-      bulkCancelRef.current = true;
-      return;
-    }
-    bulkCancelRef.current = false;
-    setBulkVisual({ running: true, done: 0, total: posts.length });
-    let done = 0;
-    for (const post of posts) {
-      if (bulkCancelRef.current) break;
-      await handleGenerateAiImage(post, { skipIfDone: true });
-      done += 1;
-      setBulkVisual({ running: !bulkCancelRef.current, done, total: posts.length });
-    }
-    setBulkVisual({ running: false, done, total: posts.length });
   };
 
   // Filter posts
@@ -452,77 +433,6 @@ ${screenshots.map((s) => `- **${s.fileName}**: ${s.title} (${s.description})`).j
     setTimeout(() => setCopiedAll(false), 2200);
   };
 
-  const handleDownloadScreenshotsZip = async () => {
-    setIsDownloadingScreenshotsZip(true);
-    try {
-      const zip = new JSZip();
-
-      // 1. Root: MASTER_BRAND_BLUEPRINT.md
-      zip.file("MASTER_BRAND_BLUEPRINT.md", effectiveMasterBrandBlueprint);
-
-      // 2. Master Prompts
-      zip.file("MASTER_IMAGE_PROMPT.txt", effectiveMasterImagePrompt);
-      zip.file("MASTER_VIDEO_PROMPT.txt", effectiveMasterVideoPrompt);
-      zip.file("MASTER_BRAND_COPYWRITING_PROMPT.txt", effectiveMasterBrandPrompt);
-
-      // 3. /all_website_screenshots/ folder
-      const allShotsFolder = zip.folder("all_website_screenshots");
-      const shotsToBundle = getUnifiedScreenshots(websiteData);
-
-      let readmeContent = `================================================================================
-ALL WEBSITE SCREENSHOTS & ASSET REFERENCE GUIDE
-Brand: ${strategy?.brandName || 'Brand'} (${websiteData?.domain || ''})
-================================================================================
-
-This directory contains real browser screenshots captured directly from ${websiteData?.url || websiteData?.domain}.
-
-FILES INCLUDED (${shotsToBundle.length} Total):
-${shotsToBundle.map(s => `- ${s.fileName}: ${s.title} (${s.description})`).join('\n')}
-
-HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
-1. FOR IMAGES (ChatGPT / Gemini / Midjourney):
-   - Upload '${shotsToBundle[0]?.fileName || 'desktop.jpg'}' alongside 'MASTER_IMAGE_PROMPT.txt'
-   - Instruct the AI: "Match the exact typography, color scheme, and UI layout shown in this screenshot."
-
-2. FOR VIDEOS (Higgsfield / Runway / Luma / Sora):
-   - Upload '${shotsToBundle[0]?.fileName || 'desktop.jpg'}' as the Starting Frame / Image-to-Video source.
-   - Paste the prompt from 'MASTER_VIDEO_PROMPT.txt'.
-   - The AI will animate the real interface without hallucinating generic elements!
-================================================================================`;
-      allShotsFolder.file("README_SCREENSHOTS.txt", readmeContent);
-
-      for (let sIdx = 0; sIdx < shotsToBundle.length; sIdx++) {
-        const shot = shotsToBundle[sIdx];
-        if (shot.webUrl) {
-          try {
-            const sBlob = await getBlobCached(shot.webUrl);
-            if (sBlob) {
-              allShotsFolder.file(shot.fileName, sBlob);
-            }
-          } catch (e) {
-            console.warn('Could not bundle screenshot in all_website_screenshots:', shot.webUrl);
-          }
-        }
-      }
-
-      const content = await zip.generateAsync({ type: "blob" });
-      const dlLink = document.createElement("a");
-      dlLink.href = URL.createObjectURL(content);
-      const safeName = (strategy?.brandName || 'Brand').replace(/\s+/g, '_');
-      dlLink.download = `${safeName}_Screenshots_Blueprint.zip`;
-      document.body.appendChild(dlLink);
-      dlLink.click();
-      document.body.removeChild(dlLink);
-
-      confetti({ particleCount: 90, spread: 75, origin: { y: 0.6 } });
-    } catch (err) {
-      console.error('Download screenshots error:', err);
-      alert('Failed to generate screenshots zip: ' + err.message);
-    } finally {
-      setIsDownloadingScreenshotsZip(false);
-    }
-  };
-
   const handleExportZip = async () => {
     setIsExportingZip(true);
     try {
@@ -648,6 +558,14 @@ SECTION / SUITE: ${p.studio || 'Core Offerings'}
 TOOL / CAPABILITY: ${p.toolName}
 BEST PUBLISHING TIME: ${p.bestTime || '9:00 AM'}
 ================================================================================
+
+HOW TO POST THIS POST (4 STEPS):
+1. Open 'ai_image_prompt.txt' — copy the prompt, paste it into the Gemini app /
+   ChatGPT / Midjourney (attach 'screenshot_before_input.jpg' for a 100%
+   brand-accurate visual) — save the generated photo or video.
+2. Come back here — copy the FULL POST CAPTION + HASHTAGS below.
+3. Open ${p.platform}, create the post, attach your generated visual.
+4. Paste the caption + hashtags → publish at ${p.bestTime || '9:00 AM'}. Done!
 
 [VIRAL HOOK / HEADLINE]
 ${p.hook}
@@ -961,26 +879,6 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
         {/* Right Global Actions */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* One-tap Visualize All — a UNIQUE real Gemini image for every post */}
-          <button
-            type="button"
-            onClick={handleVisualizeAll}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold shadow-lg transition cursor-pointer border ${bulkVisual.running ? 'bg-red-600/90 hover:bg-red-500 border-red-400/40 shadow-red-600/25' : 'bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 border-fuchsia-400/40 shadow-violet-600/25'}`}
-            title="Generate a UNIQUE AI image with Gemini for EVERY post — one tap"
-          >
-            {bulkVisual.running ? (
-              <>
-                <Square className="w-4 h-4" />
-                <span>Stop Visuals ({bulkVisual.done}/{bulkVisual.total})</span>
-              </>
-            ) : (
-              <>
-                <Wand2 className="w-4 h-4" />
-                <span>✨ Visualize All (Gemini Images)</span>
-              </>
-            )}
-          </button>
-
           <button
             type="button"
             onClick={handleCopyAll}
@@ -1046,27 +944,6 @@ Create a high-converting, photorealistic commercial product advertising hero vis
               <>
                 <Video className="w-3.5 h-3.5 text-purple-400" />
                 <span>🎬 Master Video</span>
-              </>
-            )}
-          </button>
-
-          {/* Quick Download All Screenshots & Blueprint (ZIP) */}
-          <button
-            type="button"
-            disabled={isDownloadingScreenshotsZip}
-            onClick={handleDownloadScreenshotsZip}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-blue-600/25 transition cursor-pointer disabled:opacity-60"
-            title="Download all captured website screenshots + Master Blueprint as ZIP instantly"
-          >
-            {isDownloadingScreenshotsZip ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Packaging Shots ZIP...</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                <span>📸 Screenshots & Blueprint (ZIP)</span>
               </>
             )}
           </button>
