@@ -76,7 +76,17 @@ function parseHtml(html, baseUrl) {
     });
   }
 
-  return { doc, title, description, ogImage: abs(ogImage) || '', h1s, h2s, navTexts: [...new Set(navTexts)].slice(0, 14), internal, rawSummary };
+  // Structured data (schema.org JSON-LD) — machine-readable tool/section
+  // registries (ItemList). Studio tool grids are client-rendered, so this is
+  // often the ONLY place the real tool inventory is visible to crawlers.
+  const ldJson = [];
+  for (const s of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    const raw = clean(s.textContent);
+    if (raw && raw.length > 20) ldJson.push(raw.slice(0, 30000));
+    if (ldJson.length >= 8) break;
+  }
+
+  return { doc, title, description, ogImage: abs(ogImage) || '', h1s, h2s, navTexts: [...new Set(navTexts)].slice(0, 14), internal, rawSummary, ldJson };
 }
 
 /**
@@ -141,7 +151,7 @@ function parseMarkdownPage(md, baseUrl) {
   const rawSummary = clean(plain).slice(0, 2400);
   const description = clean(plain).slice(0, 180);
 
-  return { doc: null, title, description, ogImage: '', h1s, h2s, navTexts: [...new Set(navTexts)], internal, rawSummary };
+  return { doc: null, title, description, ogImage: '', h1s, h2s, navTexts: [...new Set(navTexts)], internal, rawSummary, ldJson: [] };
 }
 
 /** Synthesize reader-style markdown from Microlink metadata (final safety net). */
@@ -288,6 +298,32 @@ function deriveStructure(pages, domain) {
         pushTool(l.name, studioGuess, `${l.name} on ${domain}`, l.href);
         if (!studios.includes(studioGuess)) studios.push(studioGuess);
       }
+    }
+  }
+
+  // Structured data beats heuristics: schema.org ItemList JSON-LD names every
+  // tool/section explicitly (studio registries, product listings). Parsed for
+  // ANY site that ships it — try/catch per block, malformed data is skipped.
+  for (const p of pages) {
+    for (const raw of p.ldJson || []) {
+      try {
+        const data = JSON.parse(raw);
+        const nodes = Array.isArray(data) ? data : [data];
+        for (const node of nodes) {
+          if (!node || typeof node !== 'object') continue;
+          if (node['@type'] !== 'ItemList' || !Array.isArray(node.itemListElement)) continue;
+          const studioGuess = p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform';
+          for (const el of node.itemListElement) {
+            const name = typeof el === 'string' ? el : (el && (el.name || (el.item && el.item.name)));
+            if (!name || typeof name !== 'string') continue;
+            const desc = typeof el === 'object' && el && (typeof el.description === 'string'
+              ? el.description
+              : (el.item && typeof el.item.description === 'string' ? el.item.description : ''));
+            const href = typeof el === 'object' && el && (el.url || (el.item && el.item.url));
+            pushTool(name, studioGuess, desc || `${name} on ${domain}`, href || p.url);
+          }
+        }
+      } catch { /* malformed JSON-LD — skip */ }
     }
   }
 
