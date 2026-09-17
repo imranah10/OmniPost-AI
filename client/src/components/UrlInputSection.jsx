@@ -11,7 +11,7 @@ import {
   Layers
 } from 'lucide-react';
 
-export default function UrlInputSection({ onStartAnalysis, isLoading, pilotMode = true, onTogglePilot = () => {} }) {
+export default function UrlInputSection({ onStartAnalysis, isLoading, pilotMode = false, onTogglePilot = () => {} }) {
   const [url, setUrl] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
   const [carouselPrompt, setCarouselPrompt] = useState('');
@@ -142,9 +142,10 @@ export default function UrlInputSection({ onStartAnalysis, isLoading, pilotMode 
                 <div className={`text-xs font-bold ${pilotMode ? 'text-white' : 'text-slate-400'}`}>
                   OMNIPILOT™ — Full Autonomy Engine
                 </div>
-                <div className="text-[10px] text-slate-400 leading-snug">
-                  Zero clicks: deep-crawls every page, screenshots everything, auto-writes copy,
-                  renders posters, carousels & video reels — end to end.
+                <div className={`text-[10px] text-slate-400 leading-snug`}>
+                  {pilotMode
+                    ? 'Full auto: the moment analysis finishes, the plan launches itself in seconds — zero clicks.'
+                    : 'You stay in control: after analysis, review the plan and press Generate. Everything still runs end to end.'}
                 </div>
               </div>
             </div>

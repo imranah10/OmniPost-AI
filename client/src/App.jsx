@@ -40,14 +40,14 @@ export default function App() {
   const [engineMode, setEngineMode] = useState('auto'); // 'server' | 'standalone'
   const [liveStep, setLiveStep] = useState(null);
   const [genProgress, setGenProgress] = useState(null);
-  // OMNIPILOT — full autonomy: deep-crawl every page, auto-accept the plan,
-  // auto-generate the entire campaign. Zero clicks after the URL (default ON).
+  // OMNIPILOT — full autonomy: auto-accept the plan and auto-generate after
+  // analysis. STRICTLY OPT-IN: default OFF, so generation always waits for the
+  // user's own click on "Accept AI Plan & Generate All" unless they explicitly
+  // flip this engine on in the URL-input screen.
   const [pilotMode, setPilotMode] = useState(() => {
     try {
-      const v = localStorage.getItem('omnipost_omnipilot');
-      if (v !== null) return v !== 'off';
-      return localStorage.getItem('omnipost_astra') !== 'off'; // migrate old key
-    } catch { return true; }
+      return localStorage.getItem('omnipost_omnipilot') === 'on';
+    } catch { return false; }
   });
   const togglePilot = (on) => {
     setPilotMode(on);
