@@ -8,6 +8,7 @@ import {
   ExternalLink, 
   Check, 
   ArrowRight, 
+  ArrowLeft, 
   SlidersHorizontal,
   Bot,
   Target,
@@ -27,7 +28,8 @@ export default function StrategyRecommendation({
   websiteData, 
   strategy, 
   onConfirmGeneration, 
-  isGeneratingCampaign
+  isGeneratingCampaign,
+  onBack
 }) {
   const [days, setDays] = useState(strategy.recommendedDays || 14);
   const [totalPosts, setTotalPosts] = useState(strategy.recommendedPostCount || 10);
@@ -90,6 +92,19 @@ export default function StrategyRecommendation({
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Back button — the Auto-Pilot result page must never be a dead end */}
+      {onBack && (
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white transition cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 text-indigo-400" />
+            <span>Back</span>
+          </button>
+        </div>
+      )}
       {/* Top Banner */}
       <div className="p-6 sm:p-8 rounded-3xl glass-panel border border-indigo-500/30 relative overflow-hidden shadow-2xl">
         <div className="absolute -right-16 -top-16 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />

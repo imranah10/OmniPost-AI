@@ -319,7 +319,9 @@ ${screenshots.map((s) => `- **${s.fileName}**: ${s.title} (${s.description})`).j
   const handleCopyPrompt = (post, type) => {
     const textToCopy = type === 'image'
       ? (post.aiImagePrompt || post.imagePrompt)
-      : (post.aiVideoPrompt || `9:16 vertical video reel showing dynamic execution of ${post.toolName} on ${strategy.brandName}`);
+      : type === 'carousel'
+        ? buildCarouselPrompt(post, strategy, websiteData)
+        : (post.aiVideoPrompt || `9:16 vertical video reel showing dynamic execution of ${post.toolName} on ${strategy.brandName}`);
     navigator.clipboard.writeText(textToCopy);
     setCopiedPromptKey(`${post.id}-${type}`);
     setTimeout(() => setCopiedPromptKey(null), 2000);
@@ -1207,6 +1209,39 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                             {post.aiVideoPrompt || `9:16 vertical video reel showing dynamic execution of ${post.toolName} on ${strategy.brandName}`}
                           </pre>
                         </div>
+
+                        {/* Carousel slide-by-slide PROMPT — user rule: carousels
+                            ship a prompt, NEVER a pre-rendered image. Same
+                            builder the ZIP's carousel_prompt.txt uses. */}
+                        {String(post.contentType || '').includes('Carousel') && (
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-bold text-pink-300 flex items-center gap-1">
+                                🎠 Carousel Slides Prompt
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPrompt(post, 'carousel')}
+                                className="px-2 py-0.5 rounded bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 text-[10px] font-bold border border-pink-500/30 transition cursor-pointer flex items-center gap-1"
+                              >
+                                {copiedPromptKey === `${post.id}-carousel` ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Copy Carousel Prompt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <pre className="p-2 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-40 overflow-y-auto">
+                              {buildCarouselPrompt(post, strategy, websiteData)}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

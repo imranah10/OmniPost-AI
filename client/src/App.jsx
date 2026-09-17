@@ -186,6 +186,13 @@ export default function App() {
     });
   };
 
+  const handleBackToInput = () => {
+    // Back from the Auto-Pilot result page — keep the analysis data so a new
+    // URL paste simply overwrites it; nothing is lost mid-session.
+    setErrorMessage('');
+    setStep('input');
+  };
+
   const handleReset = () => {
     setStep('input');
     setWebsiteData(null);
@@ -248,6 +255,7 @@ export default function App() {
             strategy={strategy}
             onConfirmGeneration={handleConfirmGeneration}
             isGeneratingCampaign={isGeneratingCampaign}
+            onBack={handleBackToInput}
           />
         )}
 

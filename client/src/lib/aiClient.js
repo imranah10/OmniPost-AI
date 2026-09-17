@@ -241,7 +241,7 @@ async function geminiError(res, preDetail = '') {
   return `Gemini error ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`;
 }
 
-async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = false, maxTokens = 8192, noThinking = false } = {}) {
+async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = false, maxTokens = 8192, noThinking = false, plain = false } = {}) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -254,13 +254,18 @@ async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = fals
     const generationConfig = {
       temperature: 0.9,
       maxOutputTokens: maxTokens,
-      ...(json ? { responseMimeType: 'application/json' } : {}),
+      // PLAIN retry mode: some models (e.g. gemini-3.5-flash on a fresh key)
+      // answer the simple "Test key" ping fine but reject JSON-mode calls with
+      // a generic 400 "Request contains an invalid argument" — responseMimeType
+      // (and/or thinkingConfig) is the unsupported argument. Plain strips both;
+      // parseJsonLoose() recovers the JSON from plain text either way.
+      ...(json && !plain ? { responseMimeType: 'application/json' } : {}),
     };
     // 3.x/2.5 flash models "think" by default and hidden thinking tokens burn
     // the output budget (root cause of MAX_TOKENS empty output). Disable for
     // every flash-generation model; models that reject the config are retried
     // without it (thinkingRejected path below).
-    if (!noThinking && /flash/.test(model)) {
+    if (!noThinking && !plain && /flash/.test(model)) {
       generationConfig.thinkingConfig = { thinkingBudget: 0 };
     }
     const res = await fetch(url, {
@@ -282,9 +287,19 @@ async function generateWithModel(apiKey, model, prompt, timeoutMs, { json = fals
       if (res.status === 404) err.modelNotFound = true; // walk the chain
       if (res.status === 429 || res.status === 500 || res.status === 503) err.retryable = true;
       if (res.status === 400 && /thinking/i.test(preDetail)) err.thinkingRejected = true;
+      // Generic 400 "Request contains an invalid argument" → the fancy config
+      // (responseMimeType / thinkingConfig) is what this model hates. NEVER
+      // surface this to the user — retry the SAME model with a plain request.
+      if (res.status === 400 && /invalid/i.test(preDetail) && !/api.?key|api_key/i.test(preDetail)) {
+        err.invalidArgument = true;
+      }
       // Some keys reject thinkingConfig (older API surfaces) — retry once without it
       if (err.thinkingRejected && !noThinking) {
         return generateWithModel(apiKey, model, prompt, timeoutMs, { json, maxTokens, noThinking: true });
+      }
+      // Invalid-argument 400 → same model, fully plain request (one level deep)
+      if (err.invalidArgument && !plain) {
+        return generateWithModel(apiKey, model, prompt, timeoutMs, { maxTokens, plain: true });
       }
       throw err;
     }
@@ -559,7 +574,11 @@ function buildVideoScript({ post, strategy, websiteData, feature }) {
 const VISUAL_ANGLES = [
   {
     key: 'hero-transform',
-    concept: (b) => `A dual-display isometric 3D showcase illustrating the instantaneous transformation "${b.before}" into "${b.after}"`,
+    // USER RULE: before & after same state ⇒ NO fake "transformation" pair —
+    // showcase the ONE real state instead ("ek hi do").
+    concept: (b) => b.single
+      ? `A dual-display isometric 3D showcase of "${b.tool}" in action: the finished result "${b.after}" glowing large on the main screen, the tool's interface on the secondary screen`
+      : `A dual-display isometric 3D showcase illustrating the instantaneous transformation "${b.before}" into "${b.after}"`,
     style: 'Ultra-clean enterprise aesthetic, luxury minimalist studio lighting, subtle neon cyber accents, vibrant holographic reflections',
     composition: 'Centered social media format (4:5), crisp depth of field, high dynamic range (HDR), 8K photorealistic render, Unreal Engine 5 commercial lighting',
     detail: 'A dynamic electric light pulse connecting the input to the output, proving 0-second execution latency without friction',
@@ -586,7 +605,9 @@ const VISUAL_ANGLES = [
   },
   {
     key: 'macro-pulse',
-    concept: (b) => `An extreme macro close-up of the transformation moment: streams of luminous data particles reassembling from "${b.before}" into the finished "${b.after}"`,
+    concept: (b) => b.single
+      ? `An extreme macro close-up of streams of luminous data particles assembling into the finished "${b.after}" inside "${b.tool}"`
+      : `An extreme macro close-up of the transformation moment: streams of luminous data particles reassembling from "${b.before}" into the finished "${b.after}"`,
     style: 'High-contrast dark scene, macro lens bokeh, iridescent particle physics, brand-colored light trails on black glass',
     composition: 'Square 1:1 macro crop, particles flowing diagonally, razor-thin focal plane, 8K photoreal CGI',
     detail: 'Individual glowing specks snapping into their final positions — ordered chaos resolving into a finished result',
@@ -613,7 +634,9 @@ const VISUAL_ANGLES = [
   },
   {
     key: 'testimonial',
-    concept: (b) => `A split-screen proof moment: left side "${b.before}" struggle, right side the same person relieved with "${b.after}" done — connected by a seam of light`,
+    concept: (b) => b.single
+      ? `An authentic documentary moment: a ${b.audienceShort} visibly relieved right after "${b.after}" completed instantly in "${b.tool}" on their screen`
+      : `A split-screen proof moment: left side "${b.before}" struggle, right side the same person relieved with "${b.after}" done — connected by a seam of light`,
     style: 'Authentic documentary commercial, natural mixed lighting (cool left / warm right), true-to-life textures, trust-building realism',
     composition: 'Split-screen 4:5, mirrored subject placement, light seam at dead center, 8K photorealistic',
     detail: 'The same pair of hands: tense on the left, relaxed on the right — body language as the proof',
@@ -656,9 +679,21 @@ export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj =
   const audience = strategy?.targetAudience || 'modern professionals';
 
   const angle = VISUAL_ANGLES[postIndex % VISUAL_ANGLES.length];
+  // USER RULE 57f: when the tool has ONE meaningful state (no tested data, or
+  // testedInput === testedOutput), the old prompt invented a fake before/after
+  // pair ("the raw input state" → "the finished live output") — nonsense like
+  // "transformation of X into X". Collapse to a single honest state instead:
+  // transformation angles switch to single-subject compositions via b.single.
+  const normState = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const beforeState = toolObj?.testedInput || '';
+  const afterState = toolObj?.testedOutput || '';
+  const single =
+    !beforeState || !afterState || normState(beforeState) === normState(afterState) ||
+    /^(the )?(raw )?input/i.test(beforeState) || /^(the )?(finished )?(live )?output/i.test(afterState);
   const b = {
-    before: toolObj?.testedInput || 'the raw input state',
-    after: toolObj?.testedOutput || 'the finished live output',
+    single,
+    before: beforeState || afterState || 'the raw input state',
+    after: afterState || beforeState || 'the finished live output',
     tool: toolName || 'the tool',
     studio: studio || 'Core Services',
     brand: brandName,
@@ -672,25 +707,25 @@ export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj =
 
 Prompt: Create a high-converting commercial advertising visual for "${brandName}" (${industry}).
 - Concept: ${angle.concept(b)}
-- Spotlight capability: "${toolName}" (${studio}) — input state: ${b.before}; live result: ${b.after}.
+- Spotlight capability: "${toolName}" (${studio})${b.single ? ` — delivers: ${b.after}` : ` — input state: ${b.before}; live result: ${b.after}`}.
 - Visual Style: ${angle.style}
 - Composition: ${angle.composition}
 - Details: ${angle.detail}`;
 
-  const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio}) — takes "${b.before}" and returns "${b.after}" instantly. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. No embedded text or watermarks.`;
+  const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio})${b.single ? ` — delivers "${b.after}" instantly` : ` — takes "${b.before}" and returns "${b.after}" instantly`}. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. No embedded text or watermarks.`;
 
   const aiVideoPrompt = `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
 (💡 TIP FOR VIRAL COMMERCIAL REEL: Upload 'screenshot_tool_live.jpg' as the START FRAME, and reuse the same live UI as the TRANSFORMATION / CLIMAX FRAME!)
 
 Prompt: A cinematic 9:16 vertical commercial video reel for "${toolName}" on ${brandName} — angle: ${angle.key}.
 - Scene 1 (0:00 - 0:03) HOOK: ${angle.camera.split(',')[0]}. On-screen bold typography: "${b.hookShort}".
-- Scene 2 (0:03 - 0:06) TRANSFORMATION: ${angle.detail}. The live result (${b.after}) renders at 0-second latency.
+- Scene 2 (0:03 - 0:06) ${b.single ? 'SHOWCASE' : 'TRANSFORMATION'}: ${angle.detail}. The live result (${b.after}) renders at 0-second latency.
 - Scene 3 (0:06 - 0:09) PROOF: The interface shown in 'screenshot_tool_live.jpg' fully alive — ${b.after}.
 - Scene 4 (0:09 - 0:10) CTA: Cinematic settle onto ${brandName} branding. On-screen CTA: "${post?.callToAction || `Try ${toolName} Now ➔ Visit ${domain}`}".
 - Camera & Motion: ${angle.camera}. 4K 60fps photorealistic commercial grade.
 - Audio Vibe: ${angle.audio}.`;
 
-  const directVideoPrompt = `Cinematic 9:16 vertical commercial reel for "${toolName}" by ${brandName}: ${angle.camera}. The scene transforms as ${angle.detail}, revealing the live result: ${b.after}. Style: ${angle.style}. End on the ${brandName} brand mark with call to action "${b.ctaShort}". Audio: ${angle.audio}. Photorealistic, 4K, high detail.`;
+  const directVideoPrompt = `Cinematic 9:16 vertical commercial reel for "${toolName}" by ${brandName}: ${angle.camera}. ${b.single ? `The scene showcases the live result: ${b.after}` : `The scene transforms as ${angle.detail}, revealing the live result: ${b.after}`}. Style: ${angle.style}. End on the ${brandName} brand mark with call to action "${b.ctaShort}". Audio: ${angle.audio}. Photorealistic, 4K, high detail.`;
 
   return { aiImagePrompt, aiVideoPrompt, directImagePrompt, directVideoPrompt, angleKey: angle.key };
 }

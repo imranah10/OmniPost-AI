@@ -26,6 +26,36 @@ import { toolIdFromUrl } from './shotMatch.js';
 
 const STOP_LINKS = /login|signin|signup|register|privacy|terms|cookie|blog\/(20|tag)|wp-|admin|cart|checkout|#|mailto:|tel:|javascript:/i;
 
+// Locale home duplicates (/de, /fr, /zh-cn, /pt-br, /pt_br …). Universal sites
+// ship one per language — crawling them wastes slots that real tool pages need.
+// MUST be strict: a naive short-hyphen regex once matched "/ocr-pdf" as locale
+// ("ocr" + "-pdf") and silently DROPPED a real tool. So: the first segment must
+// be a real ISO-639 language code and the whole path must stay short — real
+// tool slugs ("ocr-pdf", "word-to-pdf") are longer than any locale path.
+const LANG_CODES = new Set('af,sq,am,ar,hy,az,eu,be,bn,bs,bg,ca,zh,hr,cs,da,nl,en,et,fi,fr,gl,ka,de,el,gu,ha,he,hi,hu,is,id,it,ja,kn,kk,km,ko,ku,ky,lo,lv,lt,mk,ms,ml,mt,mi,mr,mn,ne,no,or,ps,fa,pl,pt,pa,ro,ru,sr,si,sk,sl,so,es,sw,sv,ta,te,th,tr,tk,uk,ur,uz,vi,cy,xh,yi,yo,zu'.split(','));
+function isLocalePath(p) {
+  const s = String(p || '');
+  const m = s.match(/^\/([a-z]{2,3})(?:[-_]([a-z0-9]{2,4}))?\/?$/i);
+  if (!m) return false;
+  if (s.replace(/\/+$/, '').length > 7) return false; // "/zh-cn"=5, "/pt-br"=6 — tool slugs exceed this
+  return LANG_CODES.has(m[1].toLowerCase());
+}
+
+/** Sitemap crawl priority: 0 home · 1 tool/studio-pattern · 2 generic · 3 blog · 9 locale duplicate. */
+function rankSitemapUrl(u) {
+  let path;
+  try {
+    path = u.replace(/^https?:\/\/[^/]+/, '').toLowerCase();
+  } catch {
+    return 5;
+  }
+  if (path === '/' || path === '') return 0;
+  if (isLocalePath(path)) return 9;
+  if (/(studio|tool|product|app|feature|category|suite|service|solution|generator|converter|calculator|utility)s?\//.test(path)) return 1;
+  if (/blog|news|article|post\//.test(path)) return 3;
+  return 2;
+}
+
 function parseHtml(html, baseUrl) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const abs = (u) => {
@@ -180,10 +210,19 @@ async function discoverSitemapUrls(origin) {
   const found = new Set();
   for (const smUrl of candidates) {
     try {
-      const xml = await Promise.race([
+      let xml = await Promise.race([
         proxyText(smUrl, { timeout: 9000 }),
         new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
       ]);
+      // Bot-protected sites (Cloudflare 403) block every raw-HTML proxy — the
+      // Reader route renders from a different IP pool and usually gets through,
+      // so it must be able to fetch the sitemap too ("koi bhi website" rule).
+      if (!xml || !/<(urlset|sitemapindex)/i.test(xml)) {
+        xml = await Promise.race([
+          readerText(smUrl, { timeout: 20000 }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 21000)),
+        ]);
+      }
       if (!xml || !/<(urlset|sitemapindex)/i.test(xml)) continue;
       const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
       // sitemap index → descend one level into child sitemaps (max 5)
@@ -191,10 +230,16 @@ async function discoverSitemapUrls(origin) {
         const children = locs.filter((l) => l.startsWith(origin)).slice(0, 5);
         for (const child of children) {
           try {
-            const childXml = await Promise.race([
+            let childXml = await Promise.race([
               proxyText(child, { timeout: 9000 }),
               new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
             ]);
+            if (!childXml || !/<(urlset|sitemapindex)/i.test(childXml)) {
+              childXml = await Promise.race([
+                readerText(child, { timeout: 20000 }),
+                new Promise((resolve) => setTimeout(() => resolve(null), 21000)),
+              ]);
+            }
             if (!childXml) continue;
             [...childXml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].forEach((m) => {
               if (m[1].startsWith(origin)) found.add(m[1]);
@@ -210,14 +255,7 @@ async function discoverSitemapUrls(origin) {
     } catch { /* try next variant */ }
   }
   const urls = [...found];
-  const rank = (u) => {
-    const path = u.replace(/^https?:\/\/[^/]+/, '').toLowerCase();
-    if (path === '/' || path === '') return 0;
-    if (/(studio|tool|product|app|feature|category|suite|service|solution|generator|converter|calculator|utility)s?\//.test(path)) return 1;
-    if (/blog|news|article|post\//.test(path)) return 3;
-    return 2;
-  };
-  return urls.sort((a, b) => rank(a) - rank(b));
+  return urls.sort((a, b) => rankSitemapUrl(a) - rankSitemapUrl(b));
 }
 
 /** Crawl a list of URLs in gentle batches, each URL bounded by a HARD
@@ -230,8 +268,11 @@ async function discoverSitemapUrls(origin) {
 const isThinPage = (p) =>
   !p || (!p.h1s?.length && !p.h2s?.length && (p.internal?.length || 0) < 3 && String(p.rawSummary || '').length < 300);
 
-async function crawlBatched(urls, { batchSize = 5, gapMs = 900, perUrlDeadlineMs = 15000, onBatch = () => {} } = {}) {
-  const grab = async (l) => {
+async function crawlBatched(urls, { batchSize = 5, gapMs = 700, perUrlDeadlineMs = 15000, globalDeadlineMs = 200000, waybackBudget = 10, onBatch = () => {} } = {}) {
+  const t0 = Date.now();
+  let waybackUsed = 0;
+  const globalLeft = () => globalDeadlineMs - (Date.now() - t0);
+  const grab = async (l, { allowWayback = true } = {}) => {
     const timer = new Promise((resolve) => setTimeout(() => resolve(null), perUrlDeadlineMs));
     const work = (async () => {
       try {
@@ -253,15 +294,51 @@ async function crawlBatched(urls, { batchSize = 5, gapMs = 900, perUrlDeadlineMs
         if (p) p.url = l;
       } catch { /* keep whatever the first pass produced */ }
     }
+    if (isThinPage(p) && allowWayback && waybackUsed < waybackBudget) {
+      // Final safety net for hard bot-protected sites (Cloudflare 403 for every
+      // proxy + Reader key-walled): the Wayback Machine serves CORS-enabled
+      // cached HTML from the browser directly. Structure pages rarely change,
+      // so an archived copy still yields honest tool discovery. BOUNDED — only
+      // `waybackBudget` pages ever pay this cost (SPA shells + reader-down
+      // once made every thin page wait 20s+ here and the analysis never ended).
+      try {
+        const wb = await Promise.race([
+          waybackText(l, { timeout: 20000 }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 21000)),
+        ]);
+        waybackUsed += 1;
+        if (wb && wb.length > 400) {
+          p = isHtmlPayload(wb) ? parseHtml(wb, l) : parseMarkdownPage(wb, l);
+          if (p) p.url = l;
+        }
+      } catch { /* keep whatever exists */ }
+    }
     return p;
   };
   const pages = [];
+  const missed = [];
   for (let i = 0; i < urls.length; i += batchSize) {
+    if (i > 0 && globalLeft() < 25000) break; // hard stop — strategy page must ALWAYS arrive
     const batch = urls.slice(i, i + batchSize);
-    const results = await Promise.all(batch.map(grab));
-    results.filter(Boolean).forEach((p) => pages.push(p));
+    const results = await Promise.all(batch.map((l) => grab(l, { allowWayback: waybackUsed < waybackBudget })));
+    results.forEach((p, j) => {
+      if (p) pages.push(p);
+      else missed.push(batch[j]); // rate-limited/timed-out this round
+    });
     onBatch({ done: Math.min(i + batchSize, urls.length), total: urls.length, found: pages.length });
     if (i + batchSize < urls.length) await new Promise((r) => setTimeout(r, gapMs));
+  }
+  // RETRY ROUND — free proxies rate-limit in bursts, so one blip used to
+  // silently DROP a real tool page from the crawl (ilovepdf's /ocr-pdf was
+  // lost this way: "34 tools, OCR missing"). One gentle re-attempt per missed
+  // URL in smaller batches recovers nearly all of them.
+  if (missed.length && missed.length <= 40) {
+    for (let i = 0; i < missed.length; i += 3) {
+      if (globalLeft() < 15000) break; // no retry past the global budget
+      const results = await Promise.all(missed.slice(i, i + 3).map((l) => grab(l, { allowWayback: false })));
+      results.forEach((p) => { if (p) pages.push(p); });
+      if (i + 3 < missed.length) await new Promise((r) => setTimeout(r, gapMs));
+    }
   }
   return pages;
 }
@@ -351,6 +428,70 @@ function deriveStructure(pages, domain) {
   }
 
   const hasStructuredRegistry = toolsMap.size >= 12;
+
+  // ── PASS 1.5 (crawl-verified tools): single-segment pages whose OWN title/h1
+  // confirms the slug. This is how the modern web names tools — ilovepdf.com
+  // /merge_pdf, /sign_pdf, /ocr-pdf; tinypng.com /shrink — none of which match
+  // the /tool/x-style link patterns below, so the old pipeline fell back to a
+  // 12-item homepage-heading scrape and HALF THE REAL TOOLS WERE MISSED.
+  // Universal rule, zero hardcoding:
+  //   • page crawled successfully (server-rendered or Reader-rendered)
+  //   • URL is one segment, not a locale duplicate (/de, /zh-cn), not junk
+  //   • every significant slug word appears in the page's title/h1/h2 text
+  //     ("merge_pdf" → title "Merge PDF files online…" ⇒ REAL tool page)
+  // Name preference: the site's own anchor text for that link ("Merge PDF"),
+  // else the titleized slug. Word-confirmation also kills blog/marketing pages
+  // (slug words never appear in their titles as cleanly) and locale pages
+  // (short codes have no significant words at all).
+  const anchorNameFor = new Map();
+  for (const p of pages) {
+    for (const l of p.internal || []) {
+      if (!l.href) continue;
+      const key = l.href.replace(/\/+$/, '') || l.href;
+      if (!anchorNameFor.has(key) && l.name) anchorNameFor.set(key, l.name);
+    }
+  }
+  for (const p of pages) {
+    try {
+      const u = new URL(p.url);
+      const segs = u.pathname.split('/').filter(Boolean);
+      if (segs.length !== 1) continue;
+      const raw = segs[0].replace(/\.(html?|php)$/i, '');
+      if (!/^[a-z0-9][a-z0-9_-]{1,40}$/i.test(raw)) continue;
+      if (isLocalePath(`/${raw}`) || STOP_LINKS.test(raw)) continue;
+      const words = raw.replace(/[-_]+/g, ' ').trim().toLowerCase().split(/\s+/);
+      const sigWords = words.filter((w) => w.length >= 3 && !/^(and|for|the|to|of|in|with)$/i.test(w));
+      if (!sigWords.length) continue; // bare locale/page codes never confirm
+      const confirmText = `${p.title || ''} ${(p.h1s || []).join(' ')} ${(p.h2s || []).slice(0, 6).join(' ')}`.toLowerCase();
+      // strict word-in-text, then a normalized retry so slug "pdfa" matches
+      // title text "PDF/A" (punctuation would otherwise kill the tool)
+      const confirmNorm = confirmText.replace(/[^a-z0-9]+/g, '');
+      if (!sigWords.every((w) => confirmText.includes(w)) &&
+          !sigWords.every((w) => confirmNorm.includes(w.replace(/[^a-z0-9]+/g, '')))) continue;
+      const hrefKey = p.url.replace(/\/+$/, '') || p.url;
+      const anchor = anchorNameFor.get(hrefKey) || anchorNameFor.get(p.url) || '';
+      let name = String(anchor || '')
+        .replace(/^(try|get|view|meet|use|the)\s+/i, '')
+        .replace(/\s+(free|now|online|today)$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const anchorBad =
+        !name || name.length < 3 || name.length > 40 || JUNK_TOOL_NAME.test(name) ||
+        QUESTION_START.test(name) || /[a-z]{4,}[A-Z]/.test(name) || /arrow_forward|free no signup/i.test(name);
+      if (anchorBad) {
+        name = raw
+          .replace(/[-_]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+          .trim();
+      }
+      if (!name || name.length < 3 || JUNK_TOOL_NAME.test(name) || QUESTION_START.test(name)) continue;
+      const studioGuess = p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || domain;
+      pushTool(name, studioGuess, p.description || `${name} on ${domain}`, p.url);
+      if (studioGuess && studioGuess !== domain && !studios.includes(studioGuess) && studios.length < 16) {
+        studios.push(studioGuess);
+      }
+    } catch { /* malformed page URL — skip */ }
+  }
 
   for (const p of pages) {
     // NOTE: nav link texts deliberately do NOT become "studios" — on generic
@@ -458,7 +599,7 @@ function deriveStructure(pages, domain) {
           `${name} on ${domain}`,
           `${u.origin}/${seg}`
         );
-        if (seenSections.size >= 10) break;
+        if (seenSections.size >= 16) break;
       } catch { /* malformed link — skip */ }
     }
   }
@@ -482,7 +623,7 @@ function deriveStructure(pages, domain) {
         h,
         homeP?.url || `https://${domain}`
       );
-      if (toolsMap.size >= 12) break; // honest compact catalog — no inflation
+      if (toolsMap.size >= 24) break; // generous heading fallback — real caps live in the crawl budget
     }
   }
 
@@ -546,7 +687,7 @@ function healthReport(pages, hasHttps) {
   return { score: Math.min(100, score), label: score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : 'Needs Work' };
 }
 
-export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 } = {}) {
+export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 56 } = {}) {
   const url = normalizeUrl(targetUrl);
   if (!url) throw new Error('Invalid URL');
   const uObj = new URL(url);
@@ -585,14 +726,29 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 
 
   // FULL-SITE discovery: sitemap first (every tool/studio page listed), then
   // nav links as fallback — dedup, drop assets, rank tool-pages first.
+  // CRAWL-BUDGET ORDER (what fits in the budget must be the site's BEST pages):
+  //   1. sitemap tool/studio-pattern URLs (rank 0-1)
+  //   2. the HOMEPAGE'S OWN links — the site's featured products/tools
+  //      (ilovepdf lists all 32 tools right on its grid)
+  //   3. remaining sitemap generic pages (rank 2)
+  //   4. blog/news (rank 3) and locale duplicates (rank 9) — last, usually cut
   onStep({ key: 'sitemap', label: 'Discovering every page via sitemap…', progress: 32 });
   const sitemapUrls = await discoverSitemapUrls(origin);
   const seenHrefs = new Set([url]);
   const linkBased = home.internal
     .map((l) => l.href)
     .filter((href) => !/\.(pdf|jpg|png|zip|xml)$/i.test(href));
+  const tierA = [];
+  const tierB = [];
+  const tierC = [];
+  for (const href of sitemapUrls) {
+    const r = rankSitemapUrl(href);
+    if (r <= 1) tierA.push(href);
+    else if (r === 2) tierB.push(href);
+    else tierC.push(href);
+  }
   const crawlTargets = [];
-  for (const href of [...sitemapUrls, ...linkBased]) {
+  for (const href of [...tierA, ...linkBased, ...tierB, ...tierC]) {
     if (seenHrefs.has(href)) continue;
     seenHrefs.add(href);
     crawlTargets.push(href);
@@ -616,7 +772,7 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 
   // day folders pair each post with the screenshot of ITS OWN tool, so a
   // wrong-page capture here would poison the whole kit downstream.
   const JUNK_SHOT_PATH = /\/(blog|privacy|terms|about|contact|api-docs|sponsors|tag)(\/|$)/i;
-  const shotCap = 30;
+  const shotCap = 36;
 
   const slugOf = (id) => String(id || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'tool';
   const seenShotPaths = new Set();
@@ -640,7 +796,7 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 
         return false;
       }
     })
-    .slice(0, 25)
+    .slice(0, 30)
     .map(({ tool, url }) => ({
       url,
       title: tool.name,
