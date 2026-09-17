@@ -14,7 +14,8 @@ import {
   Download,
   ShieldCheck,
   Monitor,
-  MapPin
+  MapPin,
+  Megaphone
 } from 'lucide-react';
 import { getUnifiedScreenshots } from './CampaignDashboard.jsx';
 import SmartShotImg from './SmartShotImg.jsx';
@@ -31,9 +32,10 @@ export default function MasterStudioModal({
   masterImagePrompt,
   masterVideoPrompt,
   masterBlueprint,
-  postingGuide
+  postingGuide,
+  masterKit
 }) {
-  const [activeTab, setActiveTab] = useState('blueprint'); // 'blueprint' | 'image' | 'video' | 'screenshots' | 'posting' | 'brief'
+  const [activeTab, setActiveTab] = useState('blueprint'); // 'blueprint' | 'image' | 'video' | 'screenshots' | 'posting' | 'masterkit' | 'brief'
   const [copiedType, setCopiedType] = useState(null);
 
   if (!isOpen) return null;
@@ -178,6 +180,19 @@ export default function MasterStudioModal({
           >
             <MapPin className="w-4 h-4" />
             <span>📍 Where To Post</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('masterkit')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              activeTab === 'masterkit'
+                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Megaphone className="w-4 h-4" />
+            <span>🚀 Master Asset Kit</span>
           </button>
 
           <button
@@ -512,6 +527,61 @@ export default function MasterStudioModal({
             </div>
           )}
 
+          {/* TAB 4c: MASTER ASSET KIT — captions for the master image & video */}
+          {activeTab === 'masterkit' && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div className="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 text-cyan-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-xs text-cyan-300">
+                  <Megaphone className="w-4 h-4 text-cyan-400" />
+                  <span>Made the master image / video? Here's WHAT TO WRITE on every platform:</span>
+                </div>
+                <p className="text-[11px] text-cyan-200/90 leading-relaxed">
+                  Don't just upload the hero visual — every platform needs a caption with it. This kit ships a ready-to-paste caption for the MASTER IMAGE and the MASTER VIDEO on each platform you selected, with link rules, best times, pinning tips and re-post hooks. The same kit ships inside the ZIP as <strong className="text-cyan-200">MASTER_ASSET_POSTING_KIT.md</strong>.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300">
+                    MASTER_ASSET_POSTING_KIT.md Preview:
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(masterKit, 'masterkit')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition cursor-pointer shadow-md shadow-cyan-600/20"
+                    >
+                      {copiedType === 'masterkit' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Kit Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Asset Kit</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTextFile('MASTER_ASSET_POSTING_KIT.md', masterKit)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download (.MD)</span>
+                    </button>
+                  </div>
+                </div>
+
+                <pre className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto scrollbar-thin selection:bg-cyan-600 selection:text-white">
+                  {masterKit}
+                </pre>
+              </div>
+            </div>
+          )}
+
           {/* TAB 5: ALL-IN-ONE MASTER STRATEGY BRIEF */}
           {activeTab === 'brief' && (
             <div className="space-y-4 animate-in fade-in duration-200">
@@ -562,7 +632,7 @@ export default function MasterStudioModal({
         <div className="p-4 px-6 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span>The <strong className="text-slate-300">/all_website_screenshots/</strong> folder, <strong className="text-slate-300">PLATFORM_POSTING_GUIDE.md</strong> and <strong className="text-slate-300">MASTER_BRAND_BLUEPRINT.md</strong> are always included inside the exported ZIP bundle.</span>
+            <span>The <strong className="text-slate-300">/all_website_screenshots/</strong> folder, <strong className="text-slate-300">PLATFORM_POSTING_GUIDE.md</strong>, <strong className="text-slate-300">MASTER_ASSET_POSTING_KIT.md</strong> and <strong className="text-slate-300">MASTER_BRAND_BLUEPRINT.md</strong> are always included inside the exported ZIP bundle.</span>
           </div>
 
           <div className="flex items-center gap-2">

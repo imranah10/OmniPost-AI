@@ -23,6 +23,7 @@ import { shotForTool } from '../lib/shotMatch.js';
 import {
   buildPlatformPostingGuide,
   buildMasterCopywritingPrompt,
+  buildMasterAssetPostingKit,
   buildStartHere,
   buildCampaignOverview,
 } from '../lib/platformGuide.js';
@@ -322,6 +323,9 @@ ${screenshots.map((s) => `- **${s.fileName}**: ${s.title} (${s.description})`).j
   const postingGuideMd = buildPlatformPostingGuide({ strategy, websiteData, posts, selectedPlatforms });
   const copywritingPromptTxt = buildMasterCopywritingPrompt({ strategy, websiteData, posts });
   const startHereTxt = buildStartHere({ strategy, websiteData, posts });
+  // Master assets (hero image + brand reel) need their own per-platform
+  // captions — “bana liya, ab kya likhu?” is answered by this kit.
+  const masterAssetKitMd = buildMasterAssetPostingKit({ strategy, websiteData, posts, selectedPlatforms });
 
   const handleCopyCaption = (post) => {
     const fullContent = `${post.caption}\n\n${post.hashtags.join(' ')}`;
@@ -435,6 +439,11 @@ ${screenshots.map((s) => `- **${s.fileName}**: ${s.title} (${s.description})`).j
       //     on the platforms the user actually selected, with per-platform
       //     caption rules and ready-to-paste short captions (X 280 etc.)
       zip.file("PLATFORM_POSTING_GUIDE.md", postingGuideMd);
+
+      // 4b. Root: MASTER_ASSET_POSTING_KIT.md — ready-to-paste captions for the
+      //     MASTER image & video on every selected platform (“sirf upload karu
+      //     ya kuchh likhna hai?” → likhne ke liye poora kit).
+      zip.file("MASTER_ASSET_POSTING_KIT.md", masterAssetKitMd);
 
       // 5. Root: CAMPAIGN_OVERVIEW.md (platforms selected + ZIP map + schedule)
       const overviewMd = buildCampaignOverview({ strategy, websiteData, posts, selectedPlatforms });
@@ -1340,6 +1349,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
           masterVideoPrompt={effectiveMasterVideoPrompt}
           masterBlueprint={effectiveMasterBrandBlueprint}
           postingGuide={postingGuideMd}
+          masterKit={masterAssetKitMd}
         />
       )}
 
