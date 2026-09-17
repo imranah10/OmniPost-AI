@@ -541,43 +541,152 @@ function buildVideoScript({ post, strategy, websiteData, feature }) {
   };
 }
 
-export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj = {}, websiteData = {} }) {
+/**
+ * 10 DISTINCT VISUAL ANGLES — one per post, cycled. Every post gets a genuinely
+ * different composition, setting, lighting and camera plan (this is why "all
+ * prompts are the same" can never happen again). Each angle yields:
+ *   aiImagePrompt      → full copy-paste prompt for ChatGPT/Gemini/Midjourney
+ *   directImagePrompt  → clean prompt sent to Gemini's image model for REAL generation
+ *   aiVideoPrompt      → full copy-paste prompt for Higgsfield/Runway/Luma/Sora
+ *   directVideoPrompt  → compact cinematic paragraph for Veo (real video generation)
+ */
+const VISUAL_ANGLES = [
+  {
+    key: 'hero-transform',
+    concept: (b) => `A dual-display isometric 3D showcase illustrating the instantaneous transformation "${b.before}" into "${b.after}"`,
+    style: 'Ultra-clean enterprise aesthetic, luxury minimalist studio lighting, subtle neon cyber accents, vibrant holographic reflections',
+    composition: 'Centered social media format (4:5), crisp depth of field, high dynamic range (HDR), 8K photorealistic render, Unreal Engine 5 commercial lighting',
+    detail: 'A dynamic electric light pulse connecting the input to the output, proving 0-second execution latency without friction',
+    camera: 'Slow heroic dolly-in on the twin floating displays, electric pulse racing from the left screen to the right, speed-ramp at the moment of transformation',
+    audio: 'Futuristic bass drop into an uplifting tech-commercial beat',
+  },
+  {
+    key: 'lifestyle',
+    concept: (b) => `A real-world lifestyle scene: a focused professional ${b.audienceShort} using "${b.tool}" on a modern smartphone, the live interface glowing as "${b.after}" appears instantly`,
+    style: 'Warm cinematic naturalism, golden-hour window light, shallow depth of field, authentic skin tones, premium lifestyle commercial photography',
+    composition: 'Vertical 4:5 editorial framing, subject rule-of-thirds left, device screen hero-lit, 8K photorealistic',
+    detail: 'Subtle brand-colored ambient glow from the screen onto the surroundings — the moment of "it actually worked" on their face',
+    camera: 'Handheld-feel slow push-in over the shoulder, rack focus from face to phone screen as the result lands',
+    audio: 'Soft ambient cafe tones rising into a confident modern beat',
+  },
+  {
+    key: 'device-mockup',
+    concept: (b) => `A floating 3D device mockup: "${b.tool}" running live on a sleek edge-lit smartphone held in mid-air, "${b.after}" rendered on-screen`,
+    style: 'Obsidian studio backdrop, electric brand-colored rim lighting, glossy glass reflections, Apple-keynote-grade product render',
+    composition: 'Product hero shot, device floating center at 12° tilt, soft floor reflection beneath, 8K photoreal octane render',
+    detail: 'Thin luminous energy ring orbiting the device — the transformation completing as the ring closes',
+    camera: 'Orbital arc around the floating device, ending front-on as the screen completes its result',
+    audio: 'Clean cinematic whoosh into a minimal premium pulse',
+  },
+  {
+    key: 'macro-pulse',
+    concept: (b) => `An extreme macro close-up of the transformation moment: streams of luminous data particles reassembling from "${b.before}" into the finished "${b.after}"`,
+    style: 'High-contrast dark scene, macro lens bokeh, iridescent particle physics, brand-colored light trails on black glass',
+    composition: 'Square 1:1 macro crop, particles flowing diagonally, razor-thin focal plane, 8K photoreal CGI',
+    detail: 'Individual glowing specks snapping into their final positions — ordered chaos resolving into a finished result',
+    camera: 'Slow-motion macro glide following the particle stream, accelerating into the final assembled frame',
+    audio: 'Tick-tick crystalline particles building into a deep satisfying resolve',
+  },
+  {
+    key: 'flatlay',
+    concept: (b) => `A premium top-down flat-lay: a designer desk where a tablet displays "${b.tool}" mid-run ("${b.after}"), surrounded by branded props, notes and tools of the trade`,
+    style: 'Bright airy editorial flat-lay, soft diffused daylight, muted premium palette with one brand-color accent, Kinfolk-magazine aesthetic',
+    composition: 'Perfect overhead 1:1 grid, generous negative space top-left for headline overlay, crisp shadows, 8K photorealistic',
+    detail: 'A printed card next to the tablet reading the outcome — the physical world acknowledging the digital result',
+    camera: 'Static overhead lock-off; elements subtly settle into perfect alignment as the tablet completes',
+    audio: 'Gentle paper and ceramic textures under a calm confident groove',
+  },
+  {
+    key: 'quote-card',
+    concept: (b) => `A bold typographic statement poster: the claim "${b.hookShort}" set in massive modern type over a deep-gradient brand-colored field with a faint abstract UI wireframe`,
+    style: 'Swiss-poster minimalism, ultra-bold grotesque typography shapes, duotone gradient (deep indigo to electric violet), premium tech-brand energy',
+    composition: 'Vertical 4:5 poster, type occupying the lower two-thirds, clean negative space above, high contrast, print-quality render',
+    detail: 'A thin luminous underline sweeping beneath the key word — understated, confident, premium',
+    camera: 'Static poster frame; the underline and gradient breathe with subtle motion',
+    audio: 'Single deep impact hit followed by airy silence',
+  },
+  {
+    key: 'testimonial',
+    concept: (b) => `A split-screen proof moment: left side "${b.before}" struggle, right side the same person relieved with "${b.after}" done — connected by a seam of light`,
+    style: 'Authentic documentary commercial, natural mixed lighting (cool left / warm right), true-to-life textures, trust-building realism',
+    composition: 'Split-screen 4:5, mirrored subject placement, light seam at dead center, 8K photorealistic',
+    detail: 'The same pair of hands: tense on the left, relaxed on the right — body language as the proof',
+    camera: 'Matched framings; a wipe of light travels left-to-right converting struggle into relief',
+    audio: 'Muted stress tones resolving into a warm hopeful chord',
+  },
+  {
+    key: 'stat-visual',
+    concept: (b) => `A cinematic data visualization: monumental holographic bars and rings rising around "${b.tool}", visualizing the speed and quality of "${b.after}"`,
+    style: 'Dark glass-and-neon data aesthetic, volumetric light, glowing chart elements in brand colors, enterprise-command-center mood',
+    composition: '16:9 hero crop safe for social, hologram centered with copy space above, depth via foreground bokeh panels, 8K CGI',
+    detail: 'One dominant metric tower shooting upward past the others — the headline number made physical',
+    camera: 'Rising crane shot as the holograms build floor-to-ceiling around the viewer',
+    audio: 'Rhythmic data ticks rising into a triumphant swell',
+  },
+  {
+    key: 'workspace',
+    concept: (b) => `A cinematic wide workspace scene: a high-end multi-monitor desk running "${b.tool}" at scale, "${b.after}" filling the main display while city lights drift behind`,
+    style: 'Night-interior cinematic, cool ambient practicals with brand-glow accents, atmospheric haze, Roger Deakins-grade lighting',
+    composition: 'Anamorphic 21:9-feel crop to 4:5, desk low-third, city bokeh background, 8K photorealistic',
+    detail: 'Reflections of the live interface in the window glass — the work glowing into the night',
+    camera: 'Very slow lateral tracking past the monitors, ending on the main display as the result completes',
+    audio: 'Deep ambient hum into a steady determined pulse',
+  },
+  {
+    key: 'neon-cta',
+    concept: (b) => `A neon-sign CTA poster: the action "${b.ctaShort}" glowing as handcrafted neon on a rain-kissed dark wall, "${b.brand}" reflected in the wet pavement`,
+    style: 'Cyberpunk-noir minimalism, saturated neon in brand colors on near-black, wet-surface reflections, cinematic haze',
+    composition: 'Vertical 9:16 poster, sign centered upper-third, reflection anchoring the bottom, moody high contrast, 8K photoreal',
+    detail: 'A passing silhouette stopping in their tracks — drawn in by the glow',
+    camera: 'Static noir frame; neon flickers once then holds steady and bright',
+    audio: 'Rain ambience with a distant electric hum resolving into brand brightness',
+  },
+];
+
+export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj = {}, websiteData = {}, postIndex = 0 }) {
   const brandName = strategy?.brandName || websiteData?.title || 'Brand';
   const industry = strategy?.industry || 'Technology & Digital Solutions';
   const domain = websiteData?.domain || websiteData?.url || '';
+  const audience = strategy?.targetAudience || 'modern professionals';
 
-  const inputShot = toolObj?.localName || 'screenshot_before_input.jpg';
-  const outputShot = toolObj?.localName || 'screenshot_after_output.jpg';
-  const testedInput = toolObj?.testedInput || 'Interactive parameters & source asset';
-  const testedOutput = toolObj?.testedOutput || 'Instant 0s latency live execution';
+  const angle = VISUAL_ANGLES[postIndex % VISUAL_ANGLES.length];
+  const b = {
+    before: toolObj?.testedInput || 'the raw input state',
+    after: toolObj?.testedOutput || 'the finished live output',
+    tool: toolName || 'the tool',
+    studio: studio || 'Core Services',
+    brand: brandName,
+    audienceShort: /business|enterprise|b2b|executive/i.test(audience) ? 'at a bright studio desk' : 'in a bright modern cafe',
+    hookShort: String(post?.hook || `Instant results with ${toolName}`).slice(0, 60),
+    ctaShort: String(post?.callToAction || `Try ${toolName} now`).replace(/👉.*$/g, '').slice(0, 48),
+  };
 
-  const aiImagePrompt = `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
-(💡 TIP FOR 100% "HUBAHU" BRAND ACCURACY: Attach BOTH '${inputShot}' (Before / Input) AND '${outputShot}' (After / Live Output) alongside this prompt into ChatGPT or Gemini!)
+  const aiImagePrompt = `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
+(💡 TIP FOR 100% "HUBAHU" BRAND ACCURACY: Attach 'screenshot_before_input.jpg' (Before / Input) AND 'screenshot_after_output.jpg' (After / Live Output) alongside this prompt into ChatGPT or Gemini!)
 
-Prompt: Create a high-converting, photorealistic commercial product advertising hero visual for "${brandName}" (${industry}).
-- Concept: A dual-display isometric 3D showcase illustrating the instantaneous transformation of "${toolName}" (${studio}).
-- Left Display (Before / Input State): Sleek floating glassmorphic window displaying the initial input interface state (${testedInput}) as shown in '${inputShot}'.
-- Right Display (After / Live Output): Glowing neon holographic output panel showcasing the verified live transformation (${testedOutput}) as shown in '${outputShot}'.
-- Visual Style: Ultra-clean enterprise aesthetic, luxury minimalist studio lighting, subtle neon cyber accents, vibrant holographic reflections.
-- Composition: Centered social media format (4:5 / 1:1), crisp depth of field, high dynamic range (HDR), 8K photorealistic render, Unreal Engine 5 commercial lighting.
-- Details: A dynamic electric light pulse connecting the input to the output, proving 0-second execution latency without friction.`;
+Prompt: Create a high-converting commercial advertising visual for "${brandName}" (${industry}).
+- Concept: ${angle.concept(b)}
+- Spotlight capability: "${toolName}" (${studio}) — input state: ${b.before}; live result: ${b.after}.
+- Visual Style: ${angle.style}
+- Composition: ${angle.composition}
+- Details: ${angle.detail}`;
 
-  const aiVideoPrompt = `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA:
-(💡 TIP FOR VIRAL COMMERCIAL REEL: Upload '${inputShot}' as the START FRAME, and use '${outputShot}' as the TRANSFORMATION / CLIMAX FRAME!)
+  const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio}) — takes "${b.before}" and returns "${b.after}" instantly. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. No embedded text or watermarks.`;
 
-Prompt: A cinematic 9:16 vertical commercial video reel showcasing the live transformation of "${toolName}" on ${brandName}.
-- Scene 1 (0:00 - 0:03) START FRAME (INPUT):
-  Dynamic push-in camera into the sleek interface shown in '${inputShot}'. The user parameters/file (${testedInput}) are loaded and ready. On-screen bold typography: "${post?.hook || `Instant ${toolName}`}".
-- Scene 2 (0:03 - 0:06) TRANSFORMATION PULSE:
-  A glowing digital ripple activates across the screen as the execute button is pressed. High-speed cyber particle wave sweeps across the interface.
-- Scene 3 (0:06 - 0:09) CLIMAX OUTPUT:
-  The interface seamlessly morphs to reveal the live rendered output shown in '${outputShot}' (${testedOutput}) with instant 0-second latency. Glowing success metrics highlight the flawless result.
-- Scene 4 (0:09 - 0:10) CALL-TO-ACTION:
-  Smooth cinematic pull-back deceleration onto ${brandName}'s glowing 3D obsidian logo. On-screen CTA: "${post?.callToAction || `Try ${toolName} Now ➔ Visit ${domain}`}".
-- Camera & Motion: Smooth robotic gimbal motion, speed ramp at transition, 4K 60fps photorealistic commercial grade.
-- Audio Vibe: Futuristic bass drop into an energetic, upbeat commercial beat (128 BPM).`;
+  const aiVideoPrompt = `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
+(💡 TIP FOR VIRAL COMMERCIAL REEL: Upload 'screenshot_before_input.jpg' as the START FRAME, and use 'screenshot_after_output.jpg' as the TRANSFORMATION / CLIMAX FRAME!)
 
-  return { aiImagePrompt, aiVideoPrompt };
+Prompt: A cinematic 9:16 vertical commercial video reel for "${toolName}" on ${brandName} — angle: ${angle.key}.
+- Scene 1 (0:00 - 0:03) HOOK: ${angle.camera.split(',')[0]}. On-screen bold typography: "${b.hookShort}".
+- Scene 2 (0:03 - 0:06) TRANSFORMATION: ${angle.detail}. The live result (${b.after}) renders at 0-second latency.
+- Scene 3 (0:06 - 0:09) PROOF: The interface shown in 'screenshot_after_output.jpg' fully alive — ${b.after}.
+- Scene 4 (0:09 - 0:10) CTA: Cinematic settle onto ${brandName} branding. On-screen CTA: "${post?.callToAction || `Try ${toolName} Now ➔ Visit ${domain}`}".
+- Camera & Motion: ${angle.camera}. 4K 60fps photorealistic commercial grade.
+- Audio Vibe: ${angle.audio}.`;
+
+  const directVideoPrompt = `Cinematic 9:16 vertical commercial reel for "${toolName}" by ${brandName}: ${angle.camera}. The scene transforms as ${angle.detail}, revealing the live result: ${b.after}. Style: ${angle.style}. End on the ${brandName} brand mark with call to action "${b.ctaShort}". Audio: ${angle.audio}. Photorealistic, 4K, high detail.`;
+
+  return { aiImagePrompt, aiVideoPrompt, directImagePrompt, directVideoPrompt, angleKey: angle.key };
 }
 
 export function generateMasterImagePrompt({ strategy, websiteData, tools = [] }) {
@@ -862,6 +971,7 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
       studio,
       toolObj: tool,
       websiteData,
+      postIndex: i,
     });
 
     const shot = (websiteData.capturedScreenshots || [])[i % (websiteData.capturedScreenshots?.length || 1)];
@@ -887,7 +997,10 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
       testedOutput: tool.testedOutput || 'Live Computation Executed',
       imagePrompt: prompts.aiImagePrompt,
       aiImagePrompt: prompts.aiImagePrompt,
+      geminiImagePrompt: prompts.directImagePrompt,
       aiVideoPrompt: prompts.aiVideoPrompt,
+      geminiVideoPrompt: prompts.directVideoPrompt,
+      visualAngle: prompts.angleKey,
       videoScript: isVideo
         ? buildVideoScript({ post: { hook, callToAction: cta }, strategy, websiteData, feature: `${tool.name} (${studio})` })
         : null,
@@ -947,7 +1060,7 @@ CRITICAL COPYWRITING INSTRUCTIONS:
 - Every post MUST spotlight a specific Section and a specific Capability from the list above.
 - Captions: first line = scroll-stopping hook naming the capability + outcome; body 3-5 punchy lines; CTA invites to ${websiteData.domain}.
 - Hashtags: 8-10 relevant, customized for ${strategy.brandName}.
-- imagePrompt: vivid photorealistic commercial advertising prompt for this post.
+- imagePrompt: a vivid commercial advertising prompt for THIS post — it MUST be a UNIQUE visual concept unlike every other post in the campaign. Rotate compositions across posts: hero product shot, real-life scene, 3D device mockup, macro detail, flat-lay desk, typographic poster, testimonial moment, data visualization, cinematic workspace, neon CTA poster. No two posts may share the same setting, lighting or framing.
 - For every post whose contentType is "Carousel Graphic", ALSO include "carouselSlides": an array of EXACTLY 4 objects, each {"kicker": "short label (max 22 chars)", "headline": "punchy swipeable headline (max 90 chars)", "body": "one supporting line (optional, max 140 chars)"}. Slide 1 = scroll-stopping cover hook; slides 2-4 = ONE distinct idea per swipe (a dedicated \"Why it wins\" slide and the final CTA slide are rendered automatically — do not include them).
 - videoScript: for video posts (${[...videoAt].join(', ')}), 4 cinematic scenes with time, visualDirection, onScreenText, voiceoverAudio.
 
@@ -986,6 +1099,7 @@ Return ONLY valid JSON:
             studio,
             toolObj,
             websiteData,
+            postIndex: i,
           });
 
           // Dedicated AI-authored carousel slide plan (user's carousel prompt applied)
@@ -1023,9 +1137,12 @@ Return ONLY valid JSON:
             rawScreenshot: shot?.webUrl || websiteData.screenshotUrl,
             testedInput: toolObj.testedInput || 'Interactive Parameters',
             testedOutput: toolObj.testedOutput || 'Live Computation Executed',
-            imagePrompt: String(p.imagePrompt || prompts.aiImagePrompt).slice(0, 600),
+            imagePrompt: String(p.imagePrompt || prompts.aiImagePrompt).slice(0, 900),
             aiImagePrompt: prompts.aiImagePrompt,
+            geminiImagePrompt: String(p.imagePrompt || prompts.directImagePrompt).slice(0, 900),
             aiVideoPrompt: prompts.aiVideoPrompt,
+            geminiVideoPrompt: prompts.directVideoPrompt,
+            visualAngle: p.visualAngle || prompts.angleKey,
             carouselContent: providedSlides,
             videoScript: script,
             engine: 'gemini',

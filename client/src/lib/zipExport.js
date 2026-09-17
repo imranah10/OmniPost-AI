@@ -36,7 +36,7 @@ export function buildDayWisePlanMarkdown(strategy, posts, websiteData) {
       md += `- **Platform:** ${p.platform}  \n- **Best time:** ${p.bestTime}\n`;
       md += `- **Hook:** ${p.hook}\n`;
       md += `\n**Caption:**\n\n\`\`\`\n${p.caption}\n${p.hashtags.join(' ')}\n\`\`\`\n`;
-      md += `\n**AI Image Prompt:**\n\n\`\`\`\n${p.aiImagePrompt || p.imagePrompt}\n\`\`\`\n`;
+      md += `\n**AI Image Prompt (unique per post):**\n\n\`\`\`\n${p.imagePrompt || p.aiImagePrompt}\n\`\`\`\n`;
       if (p.videoScript) {
         md += `\n**Video Script (${p.videoScript.duration}, ${p.videoScript.audioVibe}):**\n\n`;
         for (const s of p.videoScript.scenes) {
@@ -108,7 +108,7 @@ export async function buildCampaignZip({ strategy, websiteData, posts, masterBra
     const n = String(i + 1).padStart(2, '0');
     let txt = `${p.day} — ${p.contentType} — ${p.platform} — ${p.bestTime}\n`;
     txt += `Studio: ${p.studio} | Tool: ${p.toolName}\n\nHOOK:\n${p.hook}\n\nCAPTION:\n${p.caption}\n\n${p.hashtags.join(' ')}\n\nCTA:\n${p.callToAction}\n`;
-    txt += `\n==== AI IMAGE PROMPT (copy into ChatGPT/Gemini/Midjourney + attach screenshots) ====\n${p.aiImagePrompt || p.imagePrompt}\n`;
+    txt += `\n==== AI IMAGE PROMPT (UNIQUE per post — copy into ChatGPT/Gemini/Midjourney + attach screenshots) ====\n${p.imagePrompt || p.aiImagePrompt}\n`;
     if (p.aiVideoPrompt) txt += `\n==== AI VIDEO PROMPT (copy into Higgsfield/Runway/Luma/Sora) ====\n${p.aiVideoPrompt}\n`;
     if (p.videoScript) {
       txt += `\n==== VIDEO SCRIPT (${p.videoScript.duration}) ====\n`;
@@ -121,6 +121,26 @@ export async function buildCampaignZip({ strategy, websiteData, posts, masterBra
 
   const images = zip.folder('03_AI_IMAGES');
   const shots = zip.folder('04_ALL_WEBSITE_SCREENSHOTS');
+
+  // Real Gemini-generated media (from the Visualize All flow) — data URLs
+  await Promise.all(
+    posts.map(async (p, i) => {
+      const n = String(i + 1).padStart(2, '0');
+      if (p.__aiImgUrl) {
+        try {
+          const b = await (await fetch(p.__aiImgUrl)).blob();
+          images.file(`post-${n}-gemini.png`, b);
+        } catch { /* keep exporting */ }
+      }
+      if (p.__aiVidUrl) {
+        try {
+          const v = await (await fetch(p.__aiVidUrl)).blob();
+          const videos = zip.folder('08_AI_VIDEOS');
+          videos.file(`post-${n}-veo.mp4`, v);
+        } catch { /* keep exporting */ }
+      }
+    })
+  );
 
   // Fetch generated AI images via proxy chain (tolerant — keep going on failure)
   await Promise.all(

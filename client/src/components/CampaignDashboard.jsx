@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import JSZip from 'jszip';
 import confetti from 'canvas-confetti';
 import { 
@@ -21,9 +21,14 @@ import {
   ChevronUp,
   GalleryHorizontal,
   AlertTriangle,
-  Globe
+  Globe,
+  Wand2,
+  Loader2,
+  Clapperboard,
+  Square
 } from 'lucide-react';
 import { generateLanguagePack } from '../lib/aiClient.js';
+import { generateAIImage, generateAIVideo, cleanPrompt } from '../lib/aiMedia.js';
 import VideoReelModal from './VideoReelModal.jsx';
 import CarouselModal from './CarouselModal.jsx';
 import MasterStudioModal from './MasterStudioModal.jsx';
@@ -165,6 +170,88 @@ export default function CampaignDashboard({
   const [langState, setLangState] = useState('idle'); // 'idle' | 'loading' | 'ready' | 'error'
   const [langError, setLangError] = useState('');
   const [copiedLang, setCopiedLang] = useState('');
+
+  // === REAL AI media generation (Gemini image models + Google Veo) ===
+  // aiMedia[postId] = { phase, imgUrl, imgModel, imgError, vidUrl, vidModel, vidError, status }
+  const [aiMedia, setAiMedia] = useState({});
+  const aiMediaRef = useRef({});
+  const [bulkVisual, setBulkVisual] = useState({ running: false, done: 0, total: 0 });
+  const bulkCancelRef = useRef(false);
+  const inFlightRef = useRef({});
+
+  const updateMedia = (postId, patch) => {
+    aiMediaRef.current = { ...aiMediaRef.current, [postId]: { ...(aiMediaRef.current[postId] || {}), ...patch } };
+    setAiMedia(aiMediaRef.current);
+  };
+
+  const handleGenerateAiImage = async (post, { skipIfDone = false } = {}) => {
+    if (inFlightRef.current[`${post.id}:img`]) return false;
+    if (skipIfDone && aiMediaRef.current[post.id]?.imgUrl) return true;
+    if (!geminiApiKey) {
+      updateMedia(post.id, { phase: 'img-error', imgError: 'Add your free Gemini API key in Settings (⚙️) → API Keys — images then render right here, one tap.' });
+      return false;
+    }
+    inFlightRef.current[`${post.id}:img`] = true;
+    updateMedia(post.id, { phase: 'img-loading', imgError: '', status: 'Painting with Gemini…' });
+    try {
+      const prompt = cleanPrompt(post.geminiImagePrompt || post.imagePrompt || post.aiImagePrompt || '');
+      const { dataUrl, model } = await generateAIImage({
+        apiKey: geminiApiKey,
+        prompt,
+        aspectRatio: '4:5',
+        onStatus: (s) => updateMedia(post.id, { status: s }),
+      });
+      updateMedia(post.id, { phase: 'img-done', imgUrl: dataUrl, imgModel: model, status: '' });
+      return true;
+    } catch (err) {
+      updateMedia(post.id, { phase: 'img-error', imgError: err.message || 'Image generation failed' });
+      return false;
+    } finally {
+      delete inFlightRef.current[`${post.id}:img`];
+    }
+  };
+
+  const handleGenerateAiVideo = async (post) => {
+    if (inFlightRef.current[`${post.id}:vid`]) return;
+    if (!geminiApiKey) {
+      updateMedia(post.id, { phase: 'vid-error', vidError: 'Add your free Gemini API key in Settings (⚙️) first. Note: Veo AI video needs a billed key — the built-in Reel renderer stays 100% free.' });
+      return;
+    }
+    inFlightRef.current[`${post.id}:vid`] = true;
+    updateMedia(post.id, { phase: 'vid-loading', vidError: '', status: 'Submitting to Veo…' });
+    try {
+      const prompt = cleanPrompt(post.geminiVideoPrompt || post.aiVideoPrompt || '');
+      const { dataUrl, model } = await generateAIVideo({
+        apiKey: geminiApiKey,
+        prompt,
+        aspectRatio: '9:16',
+        onStatus: (s) => updateMedia(post.id, { status: s }),
+      });
+      updateMedia(post.id, { phase: 'vid-done', vidUrl: dataUrl, vidModel: model, status: '' });
+    } catch (err) {
+      updateMedia(post.id, { phase: 'vid-error', vidError: err.message || 'Video generation failed' });
+    } finally {
+      delete inFlightRef.current[`${post.id}:vid`];
+    }
+  };
+
+  // One-tap Visualize All — every post gets its own UNIQUE AI image (sequential queue)
+  const handleVisualizeAll = async () => {
+    if (bulkVisual.running) {
+      bulkCancelRef.current = true;
+      return;
+    }
+    bulkCancelRef.current = false;
+    setBulkVisual({ running: true, done: 0, total: posts.length });
+    let done = 0;
+    for (const post of posts) {
+      if (bulkCancelRef.current) break;
+      await handleGenerateAiImage(post, { skipIfDone: true });
+      done += 1;
+      setBulkVisual({ running: !bulkCancelRef.current, done, total: posts.length });
+    }
+    setBulkVisual({ running: false, done, total: posts.length });
+  };
 
   // Filter posts
   const filteredPosts = posts.filter(post => {
@@ -580,8 +667,8 @@ Publish on ${p.platform} at ${p.bestTime || '9:00 AM'} for maximum reach and eng
 ================================================================================`;
         dayFolder.file("post_ready_to_publish.txt", readyText);
 
-        // b) ai_image_prompt.txt
-        const imgPromptText = p.aiImagePrompt || `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
+        // b) ai_image_prompt.txt (UNIQUE per post — visual angle rotation)
+        const imgPromptText = p.imagePrompt || p.aiImagePrompt || `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
 (💡 TIP: Attach 'raw_screenshot.jpg' alongside this prompt into ChatGPT or Gemini for 100% brand UI matching!)
 
 Create a high-converting, photorealistic commercial product advertising hero visual for "${strategy.brandName}" (${strategy.industry}).
@@ -615,6 +702,25 @@ Create a high-converting, photorealistic commercial product advertising hero vis
             }
           } catch (err) {
             console.warn(`Could not bundle visual for ${p.day}:`, err.message);
+          }
+        }
+
+        // d2) REAL Gemini-generated media (AI image + Veo video) — one-tap generations from the dashboard
+        const am = aiMedia[p.id];
+        if (am?.imgUrl) {
+          try {
+            const gemBlob = await getBlobCached(am.imgUrl);
+            if (gemBlob) dayFolder.file(`gemini_ai_image.${(gemBlob.type || '').includes('jpeg') ? 'jpg' : 'png'}`, gemBlob);
+          } catch (err) {
+            console.warn(`Could not bundle Gemini image for ${p.day}:`, err.message);
+          }
+        }
+        if (am?.vidUrl) {
+          try {
+            const gemVid = await getBlobCached(am.vidUrl);
+            if (gemVid) dayFolder.file('gemini_ai_video.mp4', gemVid);
+          } catch (err) {
+            console.warn(`Could not bundle Veo video for ${p.day}:`, err.message);
           }
         }
 
@@ -855,6 +961,26 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
         {/* Right Global Actions */}
         <div className="flex flex-wrap items-center gap-3">
+          {/* One-tap Visualize All — a UNIQUE real Gemini image for every post */}
+          <button
+            type="button"
+            onClick={handleVisualizeAll}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold shadow-lg transition cursor-pointer border ${bulkVisual.running ? 'bg-red-600/90 hover:bg-red-500 border-red-400/40 shadow-red-600/25' : 'bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 border-fuchsia-400/40 shadow-violet-600/25'}`}
+            title="Generate a UNIQUE AI image with Gemini for EVERY post — one tap"
+          >
+            {bulkVisual.running ? (
+              <>
+                <Square className="w-4 h-4" />
+                <span>Stop Visuals ({bulkVisual.done}/{bulkVisual.total})</span>
+              </>
+            ) : (
+              <>
+                <Wand2 className="w-4 h-4" />
+                <span>✨ Visualize All (Gemini Images)</span>
+              </>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={handleCopyAll}
@@ -1316,6 +1442,12 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                       <Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />
                       <span className="truncate">{post.imageProvider || 'OmniPost Visual'}</span>
                     </span>
+                    {aiMedia[post.id]?.imgUrl && (
+                      <span className="flex items-center gap-1 text-[9px] font-bold text-fuchsia-300 bg-fuchsia-500/15 border border-fuchsia-500/30 px-1.5 py-0.5 rounded-full shrink-0">
+                        <Wand2 className="w-2.5 h-2.5" />
+                        Gemini Visual ✓
+                      </span>
+                    )}
                     {isVideo && post.videoProvider && (
                       <span className="truncate flex items-center gap-1 text-purple-300 shrink-0">
                         <Video className="w-3 h-3 text-purple-400 shrink-0" />
@@ -1372,8 +1504,50 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                             💡 Attach <code className="text-amber-300 font-mono">screenshot_before_input.jpg</code> & <code className="text-emerald-300 font-mono">screenshot_after_output.jpg</code> for authentic Before/After commercial visual!
                           </p>
                           <pre className="p-2 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-24 overflow-y-auto">
-                            {post.aiImagePrompt || post.imagePrompt}
+                            {post.imagePrompt || post.aiImagePrompt}
                           </pre>
+
+                          {/* REAL Gemini image generation — one tap, right here */}
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateAiImage(post)}
+                              disabled={(aiMedia[post.id]?.phase || '') === 'img-loading'}
+                              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500 text-white text-[10px] font-bold shadow-lg shadow-fuchsia-600/25 transition cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
+                            >
+                              {(aiMedia[post.id]?.phase || '') === 'img-loading' ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <span>{aiMedia[post.id]?.status || 'Painting…'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Wand2 className="w-3 h-3" />
+                                  <span>Generate with Gemini</span>
+                                </>
+                              )}
+                            </button>
+                            {aiMedia[post.id]?.imgUrl && (
+                              <a
+                                href={aiMedia[post.id].imgUrl}
+                                download={`${String(post.toolName || 'post').replace(/[^a-zA-Z0-9]+/g, '_')}_gemini_ai.png`}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 transition"
+                              >
+                                ⬇ Download Image
+                              </a>
+                            )}
+                            {aiMedia[post.id]?.imgModel && (
+                              <span className="text-[9px] text-fuchsia-300 font-semibold">via {aiMedia[post.id].imgModel}</span>
+                            )}
+                          </div>
+                          {(aiMedia[post.id]?.phase || '') === 'img-error' && (
+                            <p className="mt-1.5 text-[10px] text-red-300 bg-red-950/40 border border-red-500/30 rounded-lg px-2 py-1.5">{aiMedia[post.id]?.imgError}</p>
+                          )}
+                          {aiMedia[post.id]?.imgUrl && (
+                            <div className="mt-2 rounded-xl overflow-hidden border border-fuchsia-500/30 bg-slate-900">
+                              <img src={aiMedia[post.id].imgUrl} alt={`Gemini AI visual for ${post.toolName}`} className="w-full max-h-80 object-contain" />
+                            </div>
+                          )}
                         </div>
 
                         {/* Higgsfield / Video Prompt */}
@@ -1406,6 +1580,48 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                           <pre className="p-2 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-24 overflow-y-auto">
                             {post.aiVideoPrompt || `9:16 vertical video reel showing dynamic execution of ${post.toolName} on ${strategy.brandName}`}
                           </pre>
+
+                          {/* REAL Veo video generation — one tap */}
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateAiVideo(post)}
+                              disabled={(aiMedia[post.id]?.phase || '') === 'vid-loading'}
+                              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-[10px] font-bold shadow-lg shadow-purple-600/25 transition cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
+                            >
+                              {(aiMedia[post.id]?.phase || '') === 'vid-loading' ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <span>{aiMedia[post.id]?.status || 'Rendering…'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clapperboard className="w-3 h-3" />
+                                  <span>Generate AI Video (Veo)</span>
+                                </>
+                              )}
+                            </button>
+                            {aiMedia[post.id]?.vidUrl && (
+                              <a
+                                href={aiMedia[post.id].vidUrl}
+                                download={`${String(post.toolName || 'post').replace(/[^a-zA-Z0-9]+/g, '_')}_veo_ai.mp4`}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 transition"
+                              >
+                                ⬇ Download Video
+                              </a>
+                            )}
+                            {aiMedia[post.id]?.vidModel && (
+                              <span className="text-[9px] text-purple-300 font-semibold">via {aiMedia[post.id].vidModel}</span>
+                            )}
+                          </div>
+                          {(aiMedia[post.id]?.phase || '') === 'vid-error' && (
+                            <p className="mt-1.5 text-[10px] text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg px-2 py-1.5">{aiMedia[post.id]?.vidError}</p>
+                          )}
+                          {aiMedia[post.id]?.vidUrl && (
+                            <div className="mt-2 rounded-xl overflow-hidden border border-purple-500/30 bg-slate-900 flex justify-center">
+                              <video src={aiMedia[post.id].vidUrl} controls playsInline className="max-h-80" />
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
