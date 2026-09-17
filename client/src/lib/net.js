@@ -207,6 +207,55 @@ export function mshotsUrl(pageUrl, w = 1280, h = 800) {
   return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(pageUrl)}?w=${w}&h=${h}`;
 }
 
+/**
+ * TRUE when an <img>/Image of an mshots URL is still the upstream
+ * "generating" placeholder. Ground truth (verified live): the placeholder is
+ * a 400x300 WordPress-logo card, real captures come back at the requested
+ * width (1280) — so naturalWidth < 60% of the requested width = placeholder.
+ * naturalWidth is readable even for cross-origin images (only pixel DATA is
+ * CORS-tainted), which makes this check possible from the browser.
+ */
+export function isPlaceholderImg(img, targetW = 1280) {
+  return Boolean(img) && img.naturalWidth > 0 && img.naturalWidth < targetW * 0.6;
+}
+
+/**
+ * Poll mShots until the REAL capture replaces the "generating" placeholder.
+ * The first-ever request for a URL triggers upstream generation (which can
+ * take anywhere from ~5s to ~60s); every poll re-requests with a cache
+ * buster so the browser never serves the stale placeholder locally.
+ * @returns {Image|null} the verified real capture, or null if still pending
+ *   after `tries` attempts.
+ */
+export async function pollRealScreenshot(
+  pageUrl,
+  { w = 1280, h = 800, tries = 3, gapMs = 7000, timeoutPerTry = 15000 } = {}
+) {
+  for (let i = 0; i < tries; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, gapMs));
+    const url = `${mshotsUrl(pageUrl, w, h)}&cb=${Date.now()}-p${i}`;
+    const img = await preloadImage(url, { cors: false, timeout: timeoutPerTry });
+    if (img && !isPlaceholderImg(img, w)) return img;
+  }
+  return null;
+}
+
+/**
+ * Same placeholder check for an already-fetched image Blob (ZIP export path).
+ * Undecodable blobs return false (never guess-fail — keep existing behavior).
+ */
+export async function isPlaceholderBlob(blob, targetW = 1280) {
+  try {
+    if (!blob || !blob.type || !blob.type.startsWith('image')) return false;
+    const bmp = await createImageBitmap(blob);
+    const w = bmp.width || 0;
+    bmp.close?.();
+    return w > 0 && w < targetW * 0.6;
+  } catch {
+    return false;
+  }
+}
+
 export function preloadImage(src, { timeout = 20000, cors = true } = {}) {
   return new Promise((resolve) => {
     const img = new Image();

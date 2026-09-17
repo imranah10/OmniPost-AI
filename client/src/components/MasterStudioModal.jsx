@@ -16,6 +16,7 @@ import {
   Monitor
 } from 'lucide-react';
 import { getUnifiedScreenshots } from './CampaignDashboard.jsx';
+import SmartShotImg from './SmartShotImg.jsx';
 import { API_BASE } from '../config.js';
 import { proxyImageBlob } from '../lib/net.js';
 
@@ -256,11 +257,15 @@ export default function MasterStudioModal({
                       className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-black/50 border border-amber-500/20 text-[11px] text-slate-200"
                     >
                       {s.webUrl && (
-                        <img
-                          src={s.webUrl}
-                          alt={s.title}
-                          className="w-6 h-6 rounded object-cover border border-slate-700"
-                        />
+                        <div className="relative w-6 h-6">
+                          <SmartShotImg
+                            src={s.webUrl}
+                            alt={s.title}
+                            className="w-6 h-6 rounded object-cover border border-slate-700"
+                            maxTries={3}
+                            gapMs={8000}
+                          />
+                        </div>
                       )}
                       <span className="font-mono font-semibold text-amber-300">{s.fileName}</span>
                       <span className="text-[10px] text-slate-400 truncate max-w-[120px]">
@@ -387,13 +392,10 @@ export default function MasterStudioModal({
                   >
                     <div className="space-y-2">
                       <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 border border-slate-800">
-                        <img
+                        <SmartShotImg
                           src={shot.webUrl}
                           alt={shot.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                          onError={(e) => {
-                            e.target.src = 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&auto=format&fit=crop&q=60';
-                          }}
                         />
                         <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur text-[10px] font-mono text-emerald-400 font-bold border border-emerald-500/30">
                           {shot.fileName}

@@ -18,7 +18,7 @@ import { generateLanguagePack } from '../lib/aiClient.js';
 import MasterStudioModal from './MasterStudioModal.jsx';
 import { buildCarouselPrompt } from '../lib/carousel.js';
 import { API_BASE } from '../config.js';
-import { proxyImageBlob } from '../lib/net.js';
+import { proxyImageBlob, isPlaceholderBlob } from '../lib/net.js'; // placeholder-proof ZIP bundling
 import { shotForTool } from '../lib/shotMatch.js';
 
 export function getUnifiedScreenshots(websiteData) {
@@ -381,6 +381,21 @@ ${screenshots.map((s) => `- **${s.fileName}**: ${s.title} (${s.description})`).j
         return pr;
       };
 
+      // Placeholder-proof screenshot fetch for the ZIP: if the fetched bytes
+      // are still mShots' 400x300 "generating" placeholder (black card), re-
+      // fetch once with a fresh cache buster (upstream may have finished by
+      // now). STILL a placeholder → null → the file is SKIPPED entirely, so
+      // no day folder / screenshot folder ever contains a blank image.
+      const fetchRealShotBlob = async (url) => {
+        let blob = await getBlobCached(url);
+        if (blob && (await isPlaceholderBlob(blob, 1280))) {
+          const sep = url.includes('?') ? '&' : '?';
+          blob = await getBlobCached(`${url}${sep}zipcb=${Date.now()}`);
+          if (blob && (await isPlaceholderBlob(blob, 1280))) return null;
+        }
+        return blob || null;
+      };
+
       // 0. Root: MASTER_BRAND_BLUEPRINT.md
       zip.file("MASTER_BRAND_BLUEPRINT.md", effectiveMasterBrandBlueprint);
 
@@ -440,8 +455,8 @@ WHAT EACH FILE SHOWS:
                          (e.g. tool-time-machine.jpg = Time Machine tool screen)
 - studio-<name>.jpg    : the studio's all-tools overview page
 
-FILES INCLUDED (${shotsToBundle.length} Total):
-${shotsToBundle.map(s => `- ${s.fileName}: ${s.title} (${s.description})`).join('\n')}
+FILES INCLUDED (%SHOT_COUNT% Total):
+%SHOT_LIST%
 
 DAY FOLDER PAIRING:
 Every Day folder (Day-X_Platform_ToolName) contains ONE live screenshot —
@@ -465,21 +480,28 @@ HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
    - Copy the post's carousel_prompt.txt into Gemini / ChatGPT / Midjourney
      (attach screenshot_tool_live.jpg too) and generate slide-01.png … slide-06.png.
 ================================================================================`;
-      allShotsFolder.file("README_SCREENSHOTS.txt", readmeContent);
-
+      // Bundle every screenshot that is a REAL capture. Placeholder blobs
+      // (mShots still generating) are re-polled once, then SKIPPED — blank
+      // WordPress-logo images never ship inside the ZIP. The README is
+      // written AFTER the loop so its file list matches the real contents.
+      const bundledShotFiles = [];
       for (let sIdx = 0; sIdx < shotsToBundle.length; sIdx++) {
         const shot = shotsToBundle[sIdx];
-        if (shot.webUrl) {
-          try {
-            const sBlob = await getBlobCached(shot.webUrl);
-            if (sBlob) {
-              allShotsFolder.file(shot.fileName, sBlob);
-            }
-          } catch (e) {
-            console.warn('Could not bundle screenshot in all_website_screenshots:', shot.webUrl);
+        if (!shot.webUrl) continue;
+        try {
+          const sBlob = await fetchRealShotBlob(shot.webUrl);
+          if (sBlob) {
+            allShotsFolder.file(shot.fileName, sBlob);
+            bundledShotFiles.push(`- ${shot.fileName}: ${shot.title} (${shot.description})`);
           }
+        } catch (e) {
+          console.warn('Could not bundle screenshot in all_website_screenshots:', shot.webUrl);
         }
       }
+      readmeContent = readmeContent
+        .replace('%SHOT_COUNT%', String(bundledShotFiles.length))
+        .replace('%SHOT_LIST%', bundledShotFiles.join('\n') || '- (no captures resolved yet — re-export in a minute for late screenshots)');
+      allShotsFolder.file("README_SCREENSHOTS.txt", readmeContent);
 
       // 8. DAY-WISE FOLDERS
       for (let i = 0; i < posts.length; i++) {
@@ -577,23 +599,35 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         const rawUrl = p.screenshotUrl || matchedShot?.webUrl || outputUrl || inputUrl || '';
 
         const writeShot = async (name, url) => {
-          if (!url) return;
+          if (!url) return false;
           try {
-            const blob = await getBlobCached(url);
-            if (blob) dayFolder.file(name, blob);
+            const blob = await fetchRealShotBlob(url);
+            if (blob) {
+              dayFolder.file(name, blob);
+              return true;
+            }
           } catch (err) {
             console.warn(`Could not bundle ${name} for ${p.day}:`, err.message);
           }
+          return false;
         };
 
         if (inputUrl && outputUrl && inputUrl !== outputUrl) {
-          await writeShot('screenshot_before_input.jpg', inputUrl);
-          await writeShot('screenshot_after_output.jpg', outputUrl);
+          const okBefore = await writeShot('screenshot_before_input.jpg', inputUrl);
+          const okAfter = await writeShot('screenshot_after_output.jpg', outputUrl);
           if (rawUrl && rawUrl !== inputUrl && rawUrl !== outputUrl) {
             await writeShot('raw_screenshot.jpg', rawUrl);
           }
+          if (!okBefore && !okAfter) {
+            // Tool captures still generating upstream — fall back to the
+            // VERIFIED homepage capture instead of shipping a blank.
+            await writeShot('screenshot_tool_live.jpg', websiteData.screenshotUrl);
+          }
         } else {
-          await writeShot('screenshot_tool_live.jpg', rawUrl || outputUrl || inputUrl);
+          const okShot = await writeShot('screenshot_tool_live.jpg', rawUrl || outputUrl || inputUrl);
+          if (!okShot) {
+            await writeShot('screenshot_tool_live.jpg', websiteData.screenshotUrl);
+          }
         }
 
         // f) If video post: video_reel.webm/.mp4 and video_script.md

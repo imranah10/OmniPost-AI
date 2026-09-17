@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Sparkles, 
   Calendar, 
@@ -18,6 +18,10 @@ import {
   Maximize2,
   X
 } from 'lucide-react';
+import SmartShotImg from './SmartShotImg.jsx';
+
+const shotKindLabel = (shot) =>
+  shot?.kind === 'tool' ? 'Tool' : shot?.kind === 'home' ? 'Homepage' : 'Studio';
 
 export default function StrategyRecommendation({ 
   websiteData, 
@@ -30,6 +34,30 @@ export default function StrategyRecommendation({
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [selectedStudioTab, setSelectedStudioTab] = useState('all');
+  // Screenshots that never resolved from mShots' "generating" placeholder —
+  // their cards are removed from the gallery (a blank is NEVER shown) and the
+  // counters below update live as pending captures finish or die.
+  const [failedShots, setFailedShots] = useState(() => new Set());
+  const [resolvedShots, setResolvedShots] = useState(() => new Set());
+  const allCaptured = websiteData.capturedScreenshots || websiteData.screenshots || [];
+  const visibleShots = useMemo(
+    () => allCaptured.filter((s) => !failedShots.has(s.webUrl)),
+    [allCaptured, failedShots]
+  );
+  const markFailedShot = (url) =>
+    setFailedShots((prev) => {
+      if (prev.has(url)) return prev;
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
+  const markResolvedShot = (url) =>
+    setResolvedShots((prev) => {
+      if (prev.has(url)) return prev;
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
   // NO AUTOPILOT. Generation starts ONLY when the user clicks
   // "Accept AI Plan & Generate All" (or the custom-generate button).
 
@@ -249,7 +277,11 @@ export default function StrategyRecommendation({
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 self-start sm:self-auto">
-                {websiteData.studios?.length || 0} {websiteData.isStudioPlatform ? 'Studios' : 'Key Sections'} • {websiteData.capturedScreenshots?.length || 1} Live Screenshots
+                {(websiteData.studios?.length || 0) > 0
+                  ? `${websiteData.studios.length} ${websiteData.isStudioPlatform ? 'Studios' : 'Key Sections'}`
+                  : `${websiteData.discoveredTools?.length || 0} Tools`}
+                {' • '}
+                {visibleShots.length} Live Screenshots
               </span>
             </div>
 
@@ -269,35 +301,34 @@ export default function StrategyRecommendation({
             )}
 
             {/* Captured screenshots preview grid */}
-            {websiteData.capturedScreenshots && websiteData.capturedScreenshots.length > 0 && (
+            {visibleShots.length > 0 && (
               <div className="pt-2">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-2.5">
                   <span className="flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                    Captured {websiteData.isStudioPlatform ? 'Tool & Studio' : 'Section & Service'} Live Snapshots ({websiteData.capturedScreenshots.length}):
+                    Captured {websiteData.isStudioPlatform ? 'Tool & Studio' : 'Section & Service'} Live Snapshots ({visibleShots.length}):
                   </span>
                   <span className="text-[11px] text-slate-400">Click any card to zoom • Arrow button to download</span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
-                  {websiteData.capturedScreenshots.map((shot, idx) => (
+                  {visibleShots.map((shot, idx) => (
                     <div
-                      key={idx}
-                      onClick={() => setPreviewImage(shot)}
+                      key={shot.webUrl || idx}
+                      onClick={() => resolvedShots.has(shot.webUrl) && setPreviewImage(shot)}
                       className="rounded-xl overflow-hidden border border-slate-800 hover:border-indigo-500/60 bg-slate-950/90 shadow-md group relative aspect-[16/10] cursor-pointer transition duration-300 hover:shadow-indigo-500/20 hover:shadow-lg"
                     >
-                      <img
+                      <SmartShotImg
                         src={shot.webUrl}
                         alt={shot.title}
                         className="w-full h-full object-cover object-top group-hover:scale-105 transition duration-500"
-                        onError={(e) => {
-                          if (websiteData.screenshotUrl) e.target.src = websiteData.screenshotUrl;
-                        }}
+                        onResolved={() => markResolvedShot(shot.webUrl)}
+                        onFailed={() => markFailedShot(shot.webUrl)}
                       />
 
                       {/* Top Action overlay: Download & Maximize */}
                       <div className="absolute top-2 inset-x-2 flex items-center justify-between pointer-events-none">
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-emerald-400 border border-emerald-500/30">
-                          {shot.studio || 'Studio'}
+                          {shotKindLabel(shot)}
                         </span>
                         <div className="flex items-center gap-1 pointer-events-auto">
                           <button
@@ -339,7 +370,7 @@ export default function StrategyRecommendation({
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 font-semibold flex items-center gap-1">
                       <Sparkles className="w-3 h-3 text-emerald-400" />
-                      ⚡ {websiteData.discoveredTools.filter(t => t.isTested).length || websiteData.discoveredTools.length} Tested Live (100% Explored)
+                      ⚡ {(websiteData.capturedScreenshots || []).filter((s) => s.captured === true).length || (resolvedShots.size || 0)} Verified Live Captures
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 font-semibold">
                       📋 {websiteData.discoveredTools.length} Total Discovered

@@ -480,9 +480,13 @@ function heuristicStrategy(websiteData) {
   }
 
   const imagePosts = recommendedPostCount - videoReels;
+  // Honest rationale copy: generic sites have NO studios — count the real
+  // discovered capabilities instead of printing "0 core services".
+  const serviceCount = studiosCount > 0 ? studiosCount : toolsCount;
+  const serviceWord = studiosCount > 0 ? 'core services' : 'discovered capabilities';
   const rationale = isStudioPlatform
     ? `Because ${websiteData.domain} features ${studiosCount} distinct sections and ${toolsCount} discovered capabilities, an extended ${recommendedDays}-day campaign with ${recommendedPostCount} posts (${videoReels} high-energy video reels + ${imagePosts} visual showcases) gives every section dedicated viral spotlight without audience fatigue.`
-    : `Because ${websiteData.domain} presents ${studiosCount} core services across ${industry}, an agile ${recommendedDays}-day campaign with ${recommendedPostCount} posts (${videoReels} video reels + ${imagePosts} visual cards) ensures each client solution is systematically highlighted.`;
+    : `Because ${websiteData.domain} presents ${serviceCount} ${serviceWord} across ${industry}, an agile ${recommendedDays}-day campaign with ${recommendedPostCount} posts (${videoReels} video reels + ${imagePosts} visual cards) ensures each client solution is systematically highlighted.`;
 
   return {
     brandName: (websiteData.title || websiteData.domain).split(/[|\-–—:]/)[0].trim().slice(0, 40) || websiteData.domain,

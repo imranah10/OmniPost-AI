@@ -17,9 +17,10 @@ import {
   readerText,
   microlinkMeta,
   captureScreenshot,
-  preloadImage,
   extractPaletteFromImage,
   normalizeUrl,
+  mshotsUrl,
+  pollRealScreenshot,
 } from './net.js';
 import { toolIdFromUrl } from './shotMatch.js';
 
@@ -229,7 +230,7 @@ async function discoverSitemapUrls(origin) {
 const isThinPage = (p) =>
   !p || (!p.h1s?.length && !p.h2s?.length && (p.internal?.length || 0) < 3 && String(p.rawSummary || '').length < 300);
 
-async function crawlBatched(urls, { batchSize = 9, gapMs = 300, perUrlDeadlineMs = 15000, onBatch = () => {} } = {}) {
+async function crawlBatched(urls, { batchSize = 5, gapMs = 900, perUrlDeadlineMs = 15000, onBatch = () => {} } = {}) {
   const grab = async (l) => {
     const timer = new Promise((resolve) => setTimeout(() => resolve(null), perUrlDeadlineMs));
     const work = (async () => {
@@ -267,7 +268,23 @@ async function crawlBatched(urls, { batchSize = 9, gapMs = 300, perUrlDeadlineMs
 
 // Section headings that are NOT tools — home/marketing copy used to leak into
 // the tool registry as "Popular Tools", "Resources", "Every toolyou need…".
-const JUNK_TOOL_NAME = /^(popular tools?|resources?|studios?|tools?|categories?|features?|faq|faqs|pricing|contact|about|home|blogs?|news|how it works|why (choose|us)|every (tool|thing)[\w\s.]*|get started|all tools|more|archive|docs|documentation|api docs|support|community|changelog|testimonials?|reviews?|login|sign ?up|menu|footer|sitemap|use ?cases?|solutions)\b/i;
+// Expanded for the universal analyzer: generic sites turned nav links, case-
+// study headings and footer marketing copy into fake tools ("Key results",
+// "OUR PRODUCTS", "Get your API key", "What's next" …).
+const JUNK_TOOL_NAME = /^(popular tools?|resources?|studios?|tools?|categories?|features?|faqs?|pricing|plans?|contact( us)?|about( us)?|home|blogs?|news(letter)?|how it works|why (choose|us)|every (tool|thing)[\w\s.]*|get (started|your|in touch|a free)|all tools|more|archive|docs?|documentation|api docs?|support|community|changelog|testimonials?|reviews?|login|sign ?(up|in)|menu|footer|sitemap|use ?cases?|solutions?|overview|getting started|integrations?|status|donate|careers?|press|media kit|case stud\w*|key results?|backgrounds?|our products?|our (story|team|mission)|what'?s (next|new|included)|what our (customers|users|clients) say|^general$|new to \w+|how (does|do|it|to)|welcome( to|\s+\w+)?|introducing|related (posts|articles|products)|leave a (reply|comment)|subscribe|newsletter|follow us|learn more|read more|view all.*|explore (our|the|all).*|discover (our|the|all).*|check (out|our).*|try .*for free)\b/i;
+
+// Headings that LOOK like sentence-y marketing copy or UI labels — never a
+// tool name. Keeps the catalog honest on registry-less sites.
+const QUESTION_START = /^(how|what|why|when|where|which|who|is|are|does|do|can|could|should|would|will)\b/i;
+const looksLikeToolHeading = (h) => {
+  if (!h || h.length < 3 || h.length > 42) return false; // long marketing sentences
+  if (h.split(' ').length > 6) return false; // "Choose the right plan for the online…"
+  if (h === h.toUpperCase() && /[A-Z]{2,}/.test(h)) return false; // "OUR PRODUCTS"
+  if (/[?!:]$/.test(h)) return false; // question / UI label
+  if (/\bfree$/i.test(h) && h.split(' ').length <= 3) return false; // "Web Free"
+  if (QUESTION_START.test(h)) return false; // FAQ / blog-style headings
+  return true;
+};
 
 function deriveStructure(pages, domain) {
   const studios = [];
@@ -336,9 +353,11 @@ function deriveStructure(pages, domain) {
   const hasStructuredRegistry = toolsMap.size >= 12;
 
   for (const p of pages) {
-    for (const nav of p.navTexts) {
-      if (nav.split(' ').length <= 4 && !studios.includes(nav) && !JUNK_TOOL_NAME.test(nav)) studios.push(nav);
-    }
+    // NOTE: nav link texts deliberately do NOT become "studios" — on generic
+    // sites that filled the chip list with nav items ("Get your API key",
+    // "Status page", "Donate" …) presented as 12 fake studios. Studios are
+    // only real product sections: /studio/ pages, JSON-LD registries and
+    // multi-segment product paths (all handled below).
     // URL-slug signals: a tool= query param is a per-tool address
     // (/studio/pdf?tool=timemachine → "Time Machine"-style entries); deep
     // multi-segment tool paths (/tool/x, /products/pdf/merge) count too.
@@ -404,17 +423,66 @@ function deriveStructure(pages, domain) {
     }
   }
 
-  // ── PASS 2 (fallback): page headings as tool names — ONLY for sites that
-  // ship NO structured registry (large studio platforms skip this entirely,
-  // otherwise home-page marketing headings pollute the tool list).
+  // ── PASS 2b (fallback): real product SECTION pages from the homepage's own
+  // links — /web, /cdn, /developers, /figma, /analyzer … For registry-less
+  // sites this is the HONEST tool inventory (each entry is a real page with
+  // its own UI, so per-tool screenshots match), unlike scraped marketing
+  // headings. Blog / docs / legal / checkout targets are excluded.
   if (!hasStructuredRegistry) {
-    for (const p of pages) {
-      for (const h of [...(p.h1s || []), ...p.h2s]) {
-        const words = h.split(' ');
-        if (words.length > 9) continue; // long marketing sentences → skip
-        if (JUNK_TOOL_NAME.test(h)) continue;
-        pushTool(h, p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform', h, p.url);
-      }
+    const homeP = pages[0];
+    const seenSections = new Set();
+    const JUNK_SECTION_PATH = /\/(blog|news|article|post|press|about|contact|privacy|terms|cookie|pricing|checkout|cart|login|signup|faq|help|support|tag|category|docs?|documentation|reference|customer-story)(\/|$)/i;
+    const cleanSectionName = (s) =>
+      (s || '')
+        .replace(/^(try|get|view|meet|explore|discover|check out|use)\s+/i, '')
+        .replace(/\s+(free|now|today|online|tool)$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    for (const l of homeP?.internal || []) {
+      try {
+        const u = new URL(l.href);
+        const homeUrl = homeP?.url || `https://${domain}/`;
+        if (u.origin !== new URL(homeUrl).origin) continue; // internal links only
+        const path = u.pathname.replace(/\/+$/, '') || '/';
+        if (path === '/' || JUNK_SECTION_PATH.test(path)) continue;
+        if (/\.(pdf|jpg|png|zip|xml|svg|webp)$/i.test(path)) continue;
+        const seg = path.split('/')[1];
+        if (!seg || seenSections.has(seg)) continue;
+        const name = cleanSectionName(l.name);
+        if (!name || name.length < 3 || name.length > 32) continue;
+        if (JUNK_TOOL_NAME.test(name) || QUESTION_START.test(name) || /[a-z]{4,}[A-Z]/.test(name)) continue;
+        seenSections.add(seg);
+        pushTool(
+          name,
+          (homeP?.title || '').split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform',
+          `${name} on ${domain}`,
+          `${u.origin}/${seg}`
+        );
+        if (seenSections.size >= 10) break;
+      } catch { /* malformed link — skip */ }
+    }
+  }
+
+  // ── PASS 2 (fallback): ONLY the home page's own headings, tightly filtered —
+  // capability names ("Compress JPEG", "Image CDN", "Merge PDF"), NOT blog
+  // titles, case-study headings or footer copy. The old version scraped h2s
+  // from EVERY crawled page, which flooded generic sites' catalogs with junk
+  // ("Key results", "New to TinyPNG", "OUR PRODUCTS" …).
+  if (!hasStructuredRegistry) {
+    const homeP = pages[0];
+    const seenHeadings = new Set();
+    for (const h of [...(homeP?.h1s || []), ...(homeP?.h2s || [])]) {
+      const key = h.toLowerCase();
+      if (seenHeadings.has(key)) continue;
+      seenHeadings.add(key);
+      if (!looksLikeToolHeading(h) || JUNK_TOOL_NAME.test(h)) continue;
+      pushTool(
+        h,
+        (homeP?.title || '').split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform',
+        h,
+        homeP?.url || `https://${domain}`
+      );
+      if (toolsMap.size >= 12) break; // honest compact catalog — no inflation
     }
   }
 
@@ -450,7 +518,11 @@ function deriveStructure(pages, domain) {
   }
   discoveredTools = interleaved.slice(0, 100);
 
-  const isStudioPlatform = discoveredTools.length >= 12 || studios.length >= 6;
+  // "Studio platform" is now HONEST: it requires real discovered studio
+  // sections (product-area pages), not just a high tool count. Generic sites
+  // (TinyPNG, agencies, blogs) show "Sections & Services" instead of fake
+  // "N Studios" claims.
+  const isStudioPlatform = studios.length >= 3 && discoveredTools.length >= 8;
 
   return {
     studios: studios.slice(0, 16),
@@ -596,46 +668,71 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 
     localName: `studio-${slug}.jpg`,
   }));
 
-  const shotTargets = [
-    { url, title: home.title || 'Landing Page', description: home.description || 'Hero & full platform view', kind: 'home', localName: 'desktop.jpg' },
-    ...toolShotTargets,
-    ...studioShotTargets,
-  ];
   onStep({ key: 'screenshots', label: `Capturing live snapshots of ${toolShotTargets.length} tools + ${studioShotTargets.length} studios…`, progress: 68 });
   const screenshots = [];
-  let homeShotImg = null;
-  for (let i = 0; i < shotTargets.length; i++) {
-    const t = shotTargets[i];
-    const fname = t.localName || (i === 0 ? 'desktop.jpg' : `section-${i}.jpg`);
-    // Warm mShots for every page (real capture generates upstream & gets
-    // cached — the ZIP export fetches it later). Only the homepage waits
-    // for the full capture because we need it for the palette.
-    if (i === 0) {
-      homeShotImg = await captureScreenshot(t.url);
-      screenshots.push({
-        webUrl: `https://s.wordpress.com/mshots/v1/${encodeURIComponent(t.url)}?w=1280&h=800`,
-        localName: fname,
-        fileName: fname,
-        title: t.title,
-        description: t.description,
-        pageUrl: t.url,
-        captured: Boolean(homeShotImg),
-      });
-    } else {
-      const shotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(t.url)}?w=1280&h=800`;
-      setTimeout(() => {
-        preloadImage(shotUrl, { cors: false, timeout: 12000 }).catch(() => {});
-      }, i * 350); // stagger — be gentle with the free screenshot service
-      screenshots.push({
-        webUrl: shotUrl,
-        localName: fname,
-        fileName: fname,
-        title: t.title,
-        description: t.description,
-        pageUrl: t.url,
-        captured: 'pending',
-      });
+
+  // 1) Homepage — fully captured here (also feeds the brand palette).
+  const homeShotImg = await captureScreenshot(url, { retries: 3 });
+  screenshots.push({
+    webUrl: mshotsUrl(url),
+    localName: 'desktop.jpg',
+    fileName: 'desktop.jpg',
+    title: home.title || 'Landing Page',
+    description: home.description || 'Hero & full platform view',
+    kind: 'home',
+    pageUrl: url,
+    captured: Boolean(homeShotImg),
+  });
+
+  // 2) Tool + studio shots — VERIFY every capture before showing it.
+  //    mShots' first response for a URL is a 400x300 "generating" placeholder
+  //    (black card + WordPress logo); the old pipeline never verified the
+  //    25 pending shots, so galleries filled up with blanks. Each target is
+  //    now polled until the REAL capture lands (or the global budget runs
+  //    out — those stay 'pending' and the dashboard keeps polling them live;
+  //    confirmed-placeholders are dropped entirely — a blank is NEVER shown).
+  const pendingTargets = [...toolShotTargets, ...studioShotTargets];
+  const verified = new Map(); // url -> true (real) | false (still placeholder)
+  const VERIFY_BATCH = 5;
+  const VERIFY_BUDGET_MS = 75000;
+  const verifyT0 = Date.now();
+  for (let i = 0; i < pendingTargets.length; i += VERIFY_BATCH) {
+    const batch = pendingTargets.slice(i, i + VERIFY_BATCH);
+    await Promise.all(
+      batch.map(async (t) => {
+        try {
+          const img = await pollRealScreenshot(t.url, { tries: 3, gapMs: 6500 });
+          verified.set(t.url, Boolean(img));
+        } catch {
+          verified.set(t.url, false);
+        }
+      })
+    );
+    const done = Math.min(i + VERIFY_BATCH, pendingTargets.length);
+    onStep({
+      key: 'shots',
+      label: `Verifying live captures… ${done}/${pendingTargets.length}`,
+      progress: 70 + Math.round((done / pendingTargets.length) * 8),
+    });
+    if (Date.now() - verifyT0 > VERIFY_BUDGET_MS) break; // budget out → rest stay 'pending'
+  }
+  let droppedShots = 0;
+  for (const t of pendingTargets) {
+    const v = verified.get(t.url);
+    if (v === false) {
+      droppedShots += 1; // polled & still placeholder → would render as a blank card
+      continue;
     }
+    screenshots.push({
+      webUrl: mshotsUrl(t.url),
+      localName: t.localName,
+      fileName: t.localName,
+      title: t.title,
+      description: t.description,
+      kind: t.kind,
+      pageUrl: t.url,
+      captured: v === true ? true : 'pending',
+    });
   }
 
   onStep({ key: 'palette', label: 'Extracting brand color palette…', progress: 82 });
