@@ -7,6 +7,8 @@
  *  • 100% free heuristic + dynamic-template fallback (no key needed)
  */
 
+import { shotForTool, toolObjectForPost } from './shotMatch.js';
+
 /**
  * Model resolution — Google retires/renames models per key & region, so a
  * hardcoded model 404s for some users ("Gemini model unavailable (404)").
@@ -989,7 +991,9 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
       postIndex: i,
     });
 
-    const shot = (websiteData.capturedScreenshots || [])[i % (websiteData.capturedScreenshots?.length || 1)];
+    // Screenshot of THIS post's own tool (matched by tool URL / id / studio —
+    // never a modulo crawl-order page, which could be a blog or legal page).
+    const shot = shotForTool(websiteData, { toolName: tool.name, studio, toolUrl: tool.url });
 
     results.push({
       id: `post-${i + 1}`,
@@ -999,6 +1003,7 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
       carouselBrief: isCarousel ? (carouselPrompt || '') : '',
       studio,
       toolName: tool.name,
+      toolUrl: tool.url || '',
       hook,
       caption,
       hashtags,
@@ -1089,7 +1094,12 @@ Return ONLY valid JSON:
       if (Array.isArray(aiPosts) && aiPosts.length >= Math.min(3, totalPosts)) {
         const postsResult = aiPosts.slice(0, totalPosts).map((p, i) => {
           const mustBeVideo = videoAt.has(i) || Boolean(p.videoScript && p.videoScript.scenes && p.videoScript.scenes.length);
-          const toolObj = (websiteData.discoveredTools || [])[i % (websiteData.discoveredTools?.length || 1)] || {};
+          // Resolve the REAL tool object by NAME — the old code took
+          // discoveredTools[i % len], which could pair a post about tool X
+          // with tool Y's URL, description and screenshot.
+          const toolObj = toolObjectForPost(websiteData, p.toolName)
+            || (websiteData.discoveredTools || [])[i % (websiteData.discoveredTools?.length || 1)]
+            || {};
           const studio = p.studio || toolObj.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
           const toolName = p.toolName || toolObj.name || `Offering ${i + 1}`;
           const hook = String(p.hook || `Transform your operations with ${toolName} in ${studio}`).slice(0, 140);
@@ -1106,7 +1116,8 @@ Return ONLY valid JSON:
 
           const brandTag = `#${String(strategy.brandName || '').replace(/[^a-zA-Z0-9]/g, '')}`;
           const industryTag = `#${String(strategy.industry || '').split(' ')[0].replace(/[^a-zA-Z0-9]/g, '')}`;
-          const shot = (websiteData.capturedScreenshots || [])[i % (websiteData.capturedScreenshots?.length || 1)];
+          // Screenshot of THIS post's own tool (name-resolved) — never modulo.
+          const shot = shotForTool(websiteData, { toolName, studio, toolUrl: toolObj?.url });
 
           const prompts = buildPostAIPrompts({
             strategy,
@@ -1137,6 +1148,7 @@ Return ONLY valid JSON:
             contentType: mustBeVideo ? 'Video Reel / Short' : (i % 3 === 0 ? 'Carousel Graphic' : 'Image Post'),
             studio,
             toolName,
+            toolUrl: toolObj?.url || '',
             hook,
             caption: String(p.caption || '').slice(0, 2200),
             hashtags: Array.isArray(p.hashtags) && p.hashtags.length > 0 ? p.hashtags.slice(0, 14) : [

@@ -21,6 +21,7 @@ import {
   extractPaletteFromImage,
   normalizeUrl,
 } from './net.js';
+import { toolIdFromUrl } from './shotMatch.js';
 
 const STOP_LINKS = /login|signin|signup|register|privacy|terms|cookie|blog\/(20|tag)|wp-|admin|cart|checkout|#|mailto:|tel:|javascript:/i;
 
@@ -246,6 +247,10 @@ async function crawlBatched(urls, { batchSize = 9, gapMs = 300, perUrlDeadlineMs
   return pages;
 }
 
+// Section headings that are NOT tools — home/marketing copy used to leak into
+// the tool registry as "Popular Tools", "Resources", "Every toolyou need…".
+const JUNK_TOOL_NAME = /^(popular tools?|resources?|studios?|tools?|categories?|features?|faq|faqs|pricing|contact|about|home|blogs?|news|how it works|why (choose|us)|every (tool|thing)[\w\s.]*|get started|all tools|more|archive|docs|documentation|api docs|support|community|changelog|testimonials?|reviews?|login|sign ?up|menu|footer|sitemap|use ?cases?|solutions)\b/i;
+
 function deriveStructure(pages, domain) {
   const studios = [];
   const toolsMap = new Map();
@@ -261,48 +266,9 @@ function deriveStructure(pages, domain) {
     });
   };
 
-  for (const p of pages) {
-    for (const nav of p.navTexts) {
-      if (nav.split(' ').length <= 4 && !studios.includes(nav)) studios.push(nav);
-    }
-    // h1/h2/h3 headings on each page look like tool/capability names
-    for (const h of [...(p.h1s || []), ...p.h2s]) {
-      const words = h.split(' ');
-      if (words.length > 9) continue; // long marketing sentences → skip
-      pushTool(h, p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform', h, p.url);
-    }
-    // The page's own URL slug is a strong tool signal for deep-crawled pages
-    // (sitemap-driven): /studios/pdf-studio/pdf-merge → "Pdf Merge"
-    try {
-      const path = new URL(p.url).pathname;
-      const segs = path.split('/').filter(Boolean);
-      if (segs.length >= 2 && /^\/(tool|tools|studio|studios|category|app|apps|feature|features|product|products|suite|suites)/i.test(path)) {
-        const slugName = segs[segs.length - 1]
-          .replace(/\.(html?|php)$/i, '')
-          .replace(/[-_]+/g, ' ')
-          .replace(/\b\w/g, (c) => c.toUpperCase())
-          .trim();
-        const studioGuess = segs[0].replace(/s$/i, '').replace(/\b\w/, (c) => c.toUpperCase());
-        if (slugName && slugName.split(' ').length <= 7) {
-          pushTool(slugName, studioGuess, p.description || `${slugName} on ${domain}`, p.url);
-          if (!studios.includes(studioGuess)) studios.push(studioGuess);
-        }
-      }
-    } catch { /* malformed URL — skip */ }
-    // Tool-like links (/tool/x, /studio/y, /category/z) are gold
-    for (const l of p.internal) {
-      const path = new URL(l.href).pathname;
-      if (/^\/(tool|tools|studio|category|app|feature|product)s?\//.test(path) && l.name) {
-        const seg = path.split('/').filter(Boolean);
-        const studioGuess = (seg[0] === 'tool' || seg[0] === 'tools' ? 'Tools' : seg[0].charAt(0).toUpperCase() + seg[0].slice(1));
-        pushTool(l.name, studioGuess, `${l.name} on ${domain}`, l.href);
-        if (!studios.includes(studioGuess)) studios.push(studioGuess);
-      }
-    }
-  }
-
-  // Structured data beats heuristics: schema.org ItemList JSON-LD names every
-  // tool/section explicitly (studio registries, product listings). Parsed for
+  // ── PASS 1 (TRUTH): schema.org ItemList JSON-LD — the site's own machine-
+  // readable tool registry. Studio tool grids are client-rendered, so this is
+  // usually the ONLY place the real per-tool inventory is visible. Parsed for
   // ANY site that ships it — try/catch per block, malformed data is skipped.
   for (const p of pages) {
     for (const raw of p.ldJson || []) {
@@ -313,6 +279,7 @@ function deriveStructure(pages, domain) {
           if (!node || typeof node !== 'object') continue;
           if (node['@type'] !== 'ItemList' || !Array.isArray(node.itemListElement)) continue;
           const studioGuess = p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform';
+          if (studioGuess && !studios.includes(studioGuess)) studios.push(studioGuess);
           for (const el of node.itemListElement) {
             const name = typeof el === 'string' ? el : (el && (el.name || (el.item && el.item.name)));
             if (!name || typeof name !== 'string') continue;
@@ -327,6 +294,80 @@ function deriveStructure(pages, domain) {
     }
   }
 
+  const hasStructuredRegistry = toolsMap.size >= 12;
+
+  for (const p of pages) {
+    for (const nav of p.navTexts) {
+      if (nav.split(' ').length <= 4 && !studios.includes(nav) && !JUNK_TOOL_NAME.test(nav)) studios.push(nav);
+    }
+    // URL-slug signals: a tool= query param is a per-tool address
+    // (/studio/pdf?tool=timemachine → "Time Machine"-style entries); deep
+    // multi-segment tool paths (/tool/x, /studios/pdf/merge) count too.
+    try {
+      const u = new URL(p.url);
+      const path = u.pathname;
+      const segs = path.split('/').filter(Boolean);
+      const toolParam = u.searchParams.get('tool') || new URLSearchParams(u.hash.replace(/^#/, '')).get('tool');
+      if (toolParam && /studio/i.test(path)) {
+        const idName = toolParam.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+        const studioGuess = p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || (segs[1] || '').replace(/\b\w/, (c) => c.toUpperCase());
+        if (idName && !JUNK_TOOL_NAME.test(idName)) pushTool(idName, studioGuess, p.description || `${idName} on ${domain}`, p.url);
+      } else if (segs.length >= 3 && /^(tool|tools|studio|studios|category|app|apps|feature|features|product|products|suite|suites)/i.test(path)) {
+        const slugName = segs[segs.length - 1]
+          .replace(/\.(html?|php)$/i, '')
+          .replace(/[-_]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+          .trim();
+        const studioGuess = segs.slice(0, -1).join(' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 30);
+        if (slugName && slugName.split(' ').length <= 7 && !JUNK_TOOL_NAME.test(slugName)) {
+          pushTool(slugName, studioGuess, p.description || `${slugName} on ${domain}`, p.url);
+          if (!studios.includes(studioGuess)) studios.push(studioGuess);
+        }
+      }
+    } catch { /* malformed URL — skip */ }
+    // Tool-like links (/tool/x, /category/z, /studio/y?tool=w) are gold —
+    // a plain studio link is a STUDIO, not a tool.
+    for (const l of p.internal) {
+      try {
+        // Garbled anchor guard: blog CTA widgets concatenate icon ligature
+        // names + marketing copy ("arrow_forwardTry PDF Merger  free no
+        // signupMerge…"). Such strings are NEVER tool names.
+        if (!l.name || l.name.length > 32 || /arrow_forward|free no signup|^\s*try\s/i.test(l.name) || /[a-z]{4,}[A-Z]/.test(l.name)) continue;
+        const u = new URL(l.href);
+        const path = u.pathname;
+        if (!/^(\/)(tool|tools|studio|category|app|feature|product)s?\//i.test(path) || !l.name) continue;
+        const toolParam = u.searchParams.get('tool') || new URLSearchParams(u.hash.replace(/^#/, '')).get('tool');
+        if (toolParam) {
+          const idName = toolParam.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+          if (idName && !JUNK_TOOL_NAME.test(idName)) pushTool(idName, l.name, `${idName} in ${l.name} on ${domain}`, l.href);
+        } else if (!/^\/studio\/[^/]+\/?$/i.test(path)) {
+          const seg = path.split('/').filter(Boolean);
+          const studioGuess = (seg[0] === 'tool' || seg[0] === 'tools' ? 'Tools' : seg[0].charAt(0).toUpperCase() + seg[0].slice(1));
+          if (!JUNK_TOOL_NAME.test(l.name)) {
+            pushTool(l.name, studioGuess, `${l.name} on ${domain}`, l.href);
+            if (!studios.includes(studioGuess)) studios.push(studioGuess);
+          }
+        } else if (!studios.includes(l.name) && !JUNK_TOOL_NAME.test(l.name) && l.name.length <= 30) {
+          studios.push(l.name);
+        }
+      } catch { /* malformed link — skip */ }
+    }
+  }
+
+  // ── PASS 2 (fallback): page headings as tool names — ONLY for sites that
+  // ship NO structured registry (large studio platforms skip this entirely,
+  // otherwise home-page marketing headings pollute the tool list).
+  if (!hasStructuredRegistry) {
+    for (const p of pages) {
+      for (const h of [...(p.h1s || []), ...p.h2s]) {
+        const words = h.split(' ');
+        if (words.length > 9) continue; // long marketing sentences → skip
+        if (JUNK_TOOL_NAME.test(h)) continue;
+        pushTool(h, p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform', h, p.url);
+      }
+    }
+  }
+
   // Fallback: if nothing discovered, treat nav words as sections
   if (toolsMap.size === 0) {
     (studios.length ? studios : ['Core Platform', 'Features', 'Pricing']).forEach((s) =>
@@ -334,7 +375,31 @@ function deriveStructure(pages, domain) {
     );
   }
 
-  const discoveredTools = [...toolsMap.values()].slice(0, 100);
+  let discoveredTools = [...toolsMap.values()];
+
+  // STUDIO ROUND-ROBIN: interleave tools so consecutive posts/tools alternate
+  // across studios. Otherwise a 73-tool platform yields posts (and
+  // screenshots) from only the first studio alphabetically — the whole
+  // campaign looked same-y and ignored most of the product.
+  const byStudio = new Map();
+  discoveredTools.forEach((t) => {
+    const k = (t.studio || 'Platform').toLowerCase();
+    if (!byStudio.has(k)) byStudio.set(k, []);
+    byStudio.get(k).push(t);
+  });
+  const interleaved = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const list of byStudio.values()) {
+      if (list.length) {
+        interleaved.push(list.shift());
+        added = true;
+      }
+    }
+  }
+  discoveredTools = interleaved.slice(0, 100);
+
   const isStudioPlatform = discoveredTools.length >= 12 || studios.length >= 6;
 
   return {
@@ -424,30 +489,74 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 
   onStep({ key: 'structure', label: 'Mapping studios, tools & capabilities…', progress: 58 });
   const structure = deriveStructure(pages, domain);
 
-  const shotCap = 24;
-  onStep({ key: 'screenshots', label: `Capturing live snapshots of up to ${shotCap} key pages…`, progress: 68 });
-  // Deep capture — homepage + as many crawled pages as the free screenshot
-  // service can comfortably warm (staggered, fire-and-forget; the ZIP fetches
-  // them later). Only the homepage capture is awaited (needed for the palette).
-  const nameFor = (href) => {
-    const known = home.internal.find((l) => l.href === href);
-    if (known?.name) return known.name.slice(0, 60);
-    const seg = href.replace(/\/$/, '').split('/').filter(Boolean).pop() || 'Page';
-    return seg.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
-  };
+  // ── SCREENSHOT TARGETS: tools first, studios second, home last. Blogs,
+  // legal pages, contact/footer links are NEVER screenshotted — the ZIP's
+  // day folders pair each post with the screenshot of ITS OWN tool, so a
+  // wrong-page capture here would poison the whole kit downstream.
+  const JUNK_SHOT_PATH = /\/(blog|privacy|terms|about|contact|api-docs|sponsors|category|tag)(\/|$)/i;
+  const shotCap = 30;
+
+  const slugOf = (id) => String(id || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'tool';
+  const seenShotPaths = new Set();
+  const toolShotTargets = (structure.discoveredTools || [])
+    .map((t) => ({
+      tool: t,
+      // Normalize legacy #tool= fragments into ?tool= queries: screenshot
+      // services never send fragments, and their caches collapse
+      // fragment-only variants into ONE entry (= wrong tool's image).
+      url: t.url ? t.url.replace(/#tool=/, '?tool=') : '',
+    }))
+    .filter(({ tool, url }) => url && !JUNK_SHOT_PATH.test(url))
+    .filter(({ url }) => {
+      try {
+        const u = new URL(url);
+        const key = `${u.pathname}?${u.search}`;
+        if (seenShotPaths.has(key)) return false;
+        seenShotPaths.add(key);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, 25)
+    .map(({ tool, url }) => ({
+      url,
+      title: tool.name,
+      description: `${tool.name} — ${tool.studio}${tool.description ? ` — ${tool.description.slice(0, 80)}` : ''}`,
+      kind: 'tool',
+      localName: `tool-${slugOf(toolIdFromUrl(url) || tool.name)}.jpg`,
+    }));
+
+  // Studio overview shots (fill remaining slots) — the honest fallback when a
+  // specific tool capture is missing.
+  const studioPaths = [];
+  for (const t of structure.discoveredTools || []) {
+    try {
+      const p = new URL(t.url || '').pathname;
+      const m = p.match(/^\/studio\/([a-z0-9-]+)\/?$/i);
+      if (m && !studioPaths.some((s) => s.path === p)) studioPaths.push({ path: p, slug: m[1] });
+    } catch { /* skip */ }
+  }
+  const remaining = Math.max(0, shotCap - 1 - toolShotTargets.length);
+  const studioShotTargets = studioPaths.slice(0, remaining).map(({ path, slug }) => ({
+    url: `${origin}${path}`,
+    title: `${slug.charAt(0).toUpperCase() + slug.slice(1)} Studio`,
+    description: `Live capture of ${slug} studio — all tools overview`,
+    kind: 'studio',
+    localName: `studio-${slug}.jpg`,
+  }));
+
   const shotTargets = [
-    { url, title: home.title || 'Landing Page', description: home.description || 'Hero & full platform view' },
-    ...crawlTargets.slice(0, shotCap - 1).map((href) => ({
-      url: href,
-      title: nameFor(href),
-      description: `Live capture of ${href.replace(origin, '') || '/'} `,
-    })),
+    { url, title: home.title || 'Landing Page', description: home.description || 'Hero & full platform view', kind: 'home', localName: 'desktop.jpg' },
+    ...toolShotTargets,
+    ...studioShotTargets,
   ];
+  onStep({ key: 'screenshots', label: `Capturing live snapshots of ${toolShotTargets.length} tools + ${studioShotTargets.length} studios…`, progress: 68 });
   const screenshots = [];
   let homeShotImg = null;
   for (let i = 0; i < shotTargets.length; i++) {
     const t = shotTargets[i];
-    const fname = i === 0 ? 'desktop.jpg' : `section-${i}.jpg`;
+    const fname = t.localName || (i === 0 ? 'desktop.jpg' : `section-${i}.jpg`);
     // Warm mShots for every page (real capture generates upstream & gets
     // cached — the ZIP export fetches it later). Only the homepage waits
     // for the full capture because we need it for the palette.

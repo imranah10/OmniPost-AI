@@ -19,6 +19,7 @@ import MasterStudioModal from './MasterStudioModal.jsx';
 import { renderFullCarousel } from '../lib/carousel.js';
 import { API_BASE } from '../config.js';
 import { proxyImageBlob } from '../lib/net.js';
+import { shotForTool } from '../lib/shotMatch.js';
 
 export function getUnifiedScreenshots(websiteData) {
   if (!websiteData) return [];
@@ -433,17 +434,31 @@ Brand: ${strategy?.brandName || 'Brand'} (${websiteData?.domain || ''})
 
 This directory contains real browser screenshots captured directly from ${websiteData?.url || websiteData?.domain}.
 
+WHAT EACH FILE SHOWS:
+- desktop.jpg          : the homepage / full platform view
+- tool-<name>.jpg      : the LIVE UI of that exact tool opened inside its studio
+                         (e.g. tool-time-machine.jpg = Time Machine tool screen)
+- studio-<name>.jpg    : the studio's all-tools overview page
+
 FILES INCLUDED (${shotsToBundle.length} Total):
 ${shotsToBundle.map(s => `- ${s.fileName}: ${s.title} (${s.description})`).join('\n')}
 
+DAY FOLDER PAIRING:
+Every Day folder (Day-X_Platform_ToolName) contains screenshot_before_input.jpg,
+screenshot_after_output.jpg and raw_screenshot.jpg — ALL three are the live
+capture of THAT folder's own tool (or its studio overview if a per-tool capture
+is unavailable). The folder name and the images inside always describe the SAME
+tool now.
+
 HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
 1. FOR IMAGES (ChatGPT / Gemini / Midjourney):
-   - Upload '${shotsToBundle[0]?.fileName || 'desktop.jpg'}' alongside 'MASTER_IMAGE_PROMPT.txt'
+   - Upload the day folder's screenshot_before_input.jpg (or the tool-*.jpg from
+     here) alongside the post's ai_image_prompt.txt
    - Instruct the AI: "Match the exact typography, color scheme, and UI layout shown in this screenshot."
 
 2. FOR VIDEOS (Higgsfield / Runway / Luma / Sora):
-   - Upload '${shotsToBundle[0]?.fileName || 'desktop.jpg'}' as the Starting Frame / Image-to-Video source.
-   - Paste the prompt from 'MASTER_VIDEO_PROMPT.txt'.
+   - Upload the day folder's screenshot_before_input.jpg as the Starting Frame / Image-to-Video source.
+   - Paste the prompt from 'ai_video_prompt.txt'.
    - The AI will animate the real interface without hallucinating generic elements!
 ================================================================================`;
       allShotsFolder.file("README_SCREENSHOTS.txt", readmeContent);
@@ -549,10 +564,13 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         //     with the bundled prompts; see HOW TO POST steps in each txt)
 
         // e) Before (Input) and After (Output) live screenshots —
-        //    cycle through ALL captured pages so every day gets DIFFERENT real shots
-        const allShots = websiteData.screenshots || websiteData.capturedScreenshots || [];
-        const inputUrl = p.inputScreenshotUrl || (allShots.length ? allShots[i % allShots.length]?.webUrl : '');
-        const outputUrl = p.outputScreenshotUrl || (allShots.length ? allShots[(i + 1) % allShots.length]?.webUrl : p.screenshotUrl || '');
+        //    ALWAYS the screenshot of THIS post's own tool. The old code
+        //    cycled through ALL captured pages by modulo index, so a folder
+        //    named after one tool contained a screenshot of a blog/legal/other
+        //    page — folder name and image content never matched.
+        const matchedShot = shotForTool(websiteData, { toolName: p.toolName, studio: p.studio, toolUrl: p.toolUrl });
+        const inputUrl = p.inputScreenshotUrl || matchedShot?.webUrl || '';
+        const outputUrl = p.outputScreenshotUrl || matchedShot?.webUrl || p.screenshotUrl || '';
 
         if (inputUrl) {
           try {
@@ -576,8 +594,8 @@ Create a high-converting, photorealistic commercial product advertising hero vis
           }
         }
 
-        // e2) raw_screenshot.jpg (Primary live proof for backwards compatibility)
-        const shotUrl = p.screenshotUrl || outputUrl || inputUrl || (websiteData.screenshots && websiteData.screenshots[0]?.webUrl) || '';
+        // e2) raw_screenshot.jpg (Primary live proof — THIS post's own tool UI)
+        const shotUrl = p.screenshotUrl || matchedShot?.webUrl || outputUrl || inputUrl || '';
         if (shotUrl) {
           try {
             const shotBlob = await getBlobCached(shotUrl);
