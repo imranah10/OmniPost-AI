@@ -1,75 +1,110 @@
-# 🚀 OmniPost AI — Autonomous URL-to-Campaign Marketing Machine
+# OmniPost AI — Paste a URL. Get a complete social media campaign in one ZIP.
 
-> **100% browser-based — NO backend needed.** Paste any website URL: OmniPost crawls every page, captures live screenshots, extracts the brand palette, auto-decides the campaign duration, writes day-wise posts with captions + hashtags, generates AI marketing artwork & video prompts, and packs EVERYTHING into one ZIP you can feed to ChatGPT / Gemini / Midjourney / Runway / Higgsfield.
-> Works with zero API keys (free heuristic engine + free Pollinations image AI). Add a Gemini API key in Settings for CMO-grade AI copywriting.
+> **100% browser-based. No login, no backend database, nothing stored on any server.**
+> Paste any website URL — OmniPost crawls the site (sitemap-first), captures live screenshots, extracts the brand palette, writes a day-wise posting plan with captions and hashtags for 6 platforms, generates AI marketing images + short-form video scripts, and packs everything into a single ZIP you can post from or feed to ChatGPT / Gemini / Midjourney / Runway / Higgsfield.
 
-An intelligent, fully automated marketing platform that reads any website URL, performs comprehensive automated research, captures live website screenshots, evaluates brand identity, automatically determines optimal campaign duration and post count, and generates complete multi-day social media campaigns ($15–$30 agency quality posts, captions, hashtags, ultra-HD images, and short-form video reels).
+🌐 **Live app:** [https://imranah10.github.io/OmniPost-AI/](https://imranah10.github.io/OmniPost-AI/)
 
----
-
-## ✨ Features
-
-- 🌐 **Deep Website Scraper & Live Screenshot**: Scrapes page content, hero text, headlines, value props, and captures live high-res desktop screenshots.
-- 🧠 **Autonomous AI Strategist**: 
-  - Detects business type (B2B SaaS, E-Commerce, Agency, Mobile App, etc.).
-  - Automatically calculates and suggests optimal post count & campaign duration (e.g. *10 posts over 14 days: 4 Video Reels + 6 Visual Cards*).
-  - Provides a flexible slider if the user wants to customize days (3–30) and post count (3–25).
-- 🎯 **Optional Custom Prompt**: Allows entering specific targets (e.g. *"Focus on our 30% discount launch"* or *"Target tech founders on LinkedIn"*).
-- 🎬 **Short-Form Video Reel Studio**:
-  - Full scene-by-scene script with timestamps, visual directions, on-screen text, and voiceover copy.
-  - Interactive 9:16 mobile player preview with simulated audio waveform and synchronized captions.
-  - Ready for **Higgsfield API** rendering.
-- 📸 **Ultra-HD Marketing Visuals**:
-  - Photorealistic AI promotional graphics powered by Pollinations Flux / Turbo and custom image prompts.
-- 📦 **1-Click Full Campaign Export (.ZIP)**:
-  - Exports all generated images, captions (.txt), full video scripts (.md), and campaign schedule CSV in one click.
-- 🔑 **Custom API Keys (Zero Setup Needed)**:
-  - Built-in UI to enter **Gemini API Key** and **Higgsfield API Key**.
-  - Includes a smart autonomous heuristic engine that works 100% free out-of-the-box even without API keys!
+**Works with zero API keys** — the built-in heuristic engine plans campaigns and the free Pollinations AI generates images. Optionally add a **Gemini API key** in Settings for CMO-grade AI copywriting (your key stays in your browser) and **Higgsfield keys** for AI video rendering.
 
 ---
 
-## 🧩 How it works (Standalone Engine)
+## ✨ What it does
 
-Everything runs **in your browser** — no login, no server, no data leaves your machine:
+- 🌐 **Universal website analyzer (any URL)** — Not tied to any one site. Give it any public URL (e.g. `ilovepdf.com`, `iloveimg.com`, your own site): it reads the sitemap, crawls internal pages, filters out language/locale duplicates, and maps the site's real structure — tools, products, features, studios.
+- 📸 **Live screenshots** — Real captures of the homepage and key internal pages (WordPress mShots, free, no key), shown alongside the analysis and exported into the ZIP.
+- 🎨 **Brand DNA extraction** — Title, USP, headings, key features and a 5-color palette derived from the live screenshot's pixels (canvas analysis), so generated posts match the brand.
+- 🧠 **Campaign strategy** — Detects the business type, then recommends campaign length, post count and the video-vs-image mix. Adjustable sliders let you override the plan. A Back button returns you to the input without losing data.
+- 📝 **Day-wise campaign** — For each day: hook, caption, hashtags, CTA, best posting time and target platform assignment across **Instagram, LinkedIn, Twitter/X, TikTok, YouTube and Facebook**.
+- 🖼️ **AI marketing images** — Photorealistic visuals generated via free Pollinations (Flux/Turbo), with per-post image prompts. Carousel posts get **ready-to-use slide prompts** instead of pre-baked images, so you can design them your way.
+- 🎬 **Short-form video scripts** — Scene-by-scene 9:16 reel scripts with timestamps, visual directions, on-screen text and voiceover copy — prompt-ready for Runway / Higgsfield / Sora.
+- 🏛️ **Master Studio** — A modal with the full brand blueprint, master prompts, the platform posting guide and the master asset kit — all viewable and copyable in-app before you export.
+- 📦 **1-click ZIP export** — Everything below, in one download (see exact ZIP map).
+- 🔑 **Optional keys, zero setup** — Gemini key (with automatic model fallback chain and a Test-Key checker) and Higgsfield video keys, entered in Settings and stored only in your browser's localStorage.
+
+---
+
+## 🧩 How it works
 
 | Step | What happens | Tech |
 |---|---|---|
-| 1. Deep crawl | Fetches homepage + up to 5 internal pages, parses headings/nav/links → discovers sections, studios & tools | Same-origin Vercel proxy + DOMParser |
-| 2. Live screenshots | Real captures of homepage & key pages | WordPress mShots (free, no key) |
-| 3. Brand DNA | Title, USP, headings, features, health score, 5-color palette from the live screenshot | Canvas pixel analysis |
-| 4. Strategy | Auto-decides days / post count / video-vs-image mix | Free heuristics, or your Gemini key |
-| 5. Campaign | Day-wise posts: hook, caption, hashtags, CTA, best time, per-platform | Free templates, or your Gemini key |
-| 6. AI artwork | Photorealistic marketing visuals + branded 1080×1350 cards with your palette | Pollinations Flux (free) |
-| 7. Video reels | Scene-by-scene scripts + AI storyboard frames per scene | Prompt-ready for Runway / Higgsfield / Sora |
-| 8. 1-click ZIP | Master prompts, day-wise plan, schedule CSV, captions, AI images, screenshots, README | JSZip in-browser |
+| 1. Deep crawl | Sitemap-first crawl of internal pages, then homepage-link discovery; locale/language links filtered; retry round for rate-limited fetches; Wayback Machine fallback | Same-origin Vercel proxy `/api/proxy` → allorigins → cors.workers.dev → cors.lol → codetabs → r.jina.ai + DOMParser |
+| 2. Live screenshots | Homepage + key internal pages captured | WordPress mShots (free, no key) |
+| 3. Brand DNA | Title, USP, headings, features, 5-color palette from screenshot pixels | Canvas pixel analysis |
+| 4. Strategy | Business type, campaign length, post count, video/image mix | Free heuristics, or your Gemini key |
+| 5. Campaign | Day-wise posts: hook, caption, hashtags, CTA, best time, platform | Free templates, or your Gemini key |
+| 6. AI artwork | Photorealistic marketing visuals + per-post and carousel prompts | Pollinations Flux/Turbo (free) |
+| 7. Video reels | Scene-by-scene scripts + per-scene storyboard prompts | Prompt-ready for Runway / Higgsfield / Sora |
+| 8. 1-click ZIP | Full export (map below) | JSZip, in-browser |
 
-**Deployed functions:** `/api/proxy` (Vercel serverless, included) fetches pages/screenshots with CORS — no third-party proxy dependency.
+**Deployed function:** `/api/proxy` (Vercel serverless, included in this repo) fetches pages with CORS so the browser never hits rate limits alone.
 
-## 🛠️ Quick Start
+---
 
-### 1. Install & Run
-```bash
-# Start backend server (serves frontend at http://localhost:5000)
-npm start
+## 📦 What's inside the exported ZIP
+
 ```
-Or for local development:
-```bash
-# Terminal 1: Start backend
-npm run server
-
-# Terminal 2: Start frontend dev server
-npm run client
+START_HERE.txt                     ← read-me-first: what this ZIP is, reading order
+CAMPAIGN_OVERVIEW.md               ← campaign summary + ZIP map
+PLATFORM_POSTING_GUIDE.md          ← per selected platform: which posts go where,
+                                     how to post, what to write, caption limits,
+                                     ready-to-paste X captions, final pre-publish check
+MASTER_ASSET_POSTING_KIT.md        ← ready-to-paste captions for the master image &
+                                     master video on every selected platform
+MASTER_ALL_IN_ONE_PROMPT.txt       ← brand DNA + image/video specs (one master prompt)
+MASTER_BRAND_COPYWRITING_PROMPT.txt ← text-writing engine: voice, per-platform rules
+MASTER_IMAGE_PROMPT.txt            ← master hero-image prompt
+MASTER_VIDEO_PROMPT.txt            ← master brand-reel prompt
+schedule.csv                       ← full day-wise schedule (opens in Excel/Sheets)
+day-XX_<post-name>/                ← one folder per post: caption .txt,
+                                     post_ready_to_publish.txt, image prompts, images
+all_website_screenshots/           ← the live site captures
 ```
 
-### 2. Open in Browser
-Visit: **`http://localhost:5000`** (or `http://localhost:3000` in dev mode)
+---
 
-### 3. Usage
-1. Enter any website URL (e.g. `https://linear.app`, `https://shopify.com` or your own site).
-2. (Optional) Enter custom campaign instructions or discount focus.
-3. Click **"Auto-Pilot Launch"**.
-4. The AI will scan the website, capture a live screenshot, and present its recommended strategy and post breakdown.
-5. Click **"Accept AI Plan & Generate All"** (or adjust using the sliders).
-6. Explore your complete marketing campaign with Instagram, LinkedIn, Twitter/X posts, and interactive Video Reel scripts!
-7. Click **"Export Full Campaign (ZIP)"** to download everything in 1 click.
+## 🚀 Quick Start
+
+### Option A — Use it live (no install)
+Open **[imranah10.github.io/OmniPost-AI](https://imranah10.github.io/OmniPost-AI/)**, paste a URL, click **Auto-Pilot Launch**, review the plan, click **Accept AI Plan & Generate All**, then **Export Full Campaign (ZIP)**.
+
+### Option B — Run locally (client only)
+```bash
+git clone https://github.com/imranah10/OmniPost-AI.git
+cd OmniPost-AI/client
+npm install
+npm run dev        # Vite dev server
+```
+The app falls back to public CORS proxies in local dev, so analysis works without any backend.
+
+### Option C — Deploy your own (Vercel)
+The repo ships with `vercel.json` (Vite build + `/api/proxy` serverless function). Import the repo into Vercel and deploy — no environment variables required for free mode.
+
+---
+
+## 🔑 API keys (all optional)
+
+| Key | Where | What it unlocks |
+|---|---|---|
+| Gemini API Key | Settings (⚙️) | AI-written strategy + campaign copy, with automatic model fallback and a Test-Key checker |
+| Higgsfield Key ID + Secret | Settings (⚙️) | AI video rendering for the reel scripts |
+
+Without any key: heuristic strategy, template copy and Pollinations images still work — the full pipeline is usable for free.
+
+---
+
+## ⚠️ Honest limitations
+
+- Heavily bot-protected sites (aggressive Cloudflare rules that block every free proxy) can't be deep-crawled from the browser; analysis then completes with the homepage capture and a heuristic plan instead of failing.
+- Screenshot quality depends on the third-party mShots service; slow-loading pages may capture partially rendered.
+- AI images are generated by the free Pollinations service — quality varies and no SLA is promised.
+
+---
+
+## 🛠️ Tech stack
+
+React + Vite · JavaScript · JSZip · Canvas API · Gemini API (BYOK) · Pollinations · WordPress mShots · Vercel Serverless Functions · GitHub Pages
+
+---
+
+Built by [Imran Ahmad](https://github.com/imranah10) — also see [PromptForge](https://promptforge-navy-psi.vercel.app/) (BYOK AI studio) and [Toolverse](https://toolverse-official.vercel.app/) (AI tools directory).
