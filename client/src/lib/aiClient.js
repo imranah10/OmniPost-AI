@@ -664,7 +664,7 @@ export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj =
   };
 
   const aiImagePrompt = `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
-(💡 TIP FOR 100% "HUBAHU" BRAND ACCURACY: Attach 'screenshot_before_input.jpg' (Before / Input) AND 'screenshot_after_output.jpg' (After / Live Output) alongside this prompt into ChatGPT or Gemini!)
+(💡 TIP FOR 100% "HUBAHU" BRAND ACCURACY: Attach 'screenshot_tool_live.jpg' — this tool's real UI — alongside this prompt into ChatGPT or Gemini!)
 
 Prompt: Create a high-converting commercial advertising visual for "${brandName}" (${industry}).
 - Concept: ${angle.concept(b)}
@@ -676,12 +676,12 @@ Prompt: Create a high-converting commercial advertising visual for "${brandName}
   const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio}) — takes "${b.before}" and returns "${b.after}" instantly. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. No embedded text or watermarks.`;
 
   const aiVideoPrompt = `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
-(💡 TIP FOR VIRAL COMMERCIAL REEL: Upload 'screenshot_before_input.jpg' as the START FRAME, and use 'screenshot_after_output.jpg' as the TRANSFORMATION / CLIMAX FRAME!)
+(💡 TIP FOR VIRAL COMMERCIAL REEL: Upload 'screenshot_tool_live.jpg' as the START FRAME, and reuse the same live UI as the TRANSFORMATION / CLIMAX FRAME!)
 
 Prompt: A cinematic 9:16 vertical commercial video reel for "${toolName}" on ${brandName} — angle: ${angle.key}.
 - Scene 1 (0:00 - 0:03) HOOK: ${angle.camera.split(',')[0]}. On-screen bold typography: "${b.hookShort}".
 - Scene 2 (0:03 - 0:06) TRANSFORMATION: ${angle.detail}. The live result (${b.after}) renders at 0-second latency.
-- Scene 3 (0:06 - 0:09) PROOF: The interface shown in 'screenshot_after_output.jpg' fully alive — ${b.after}.
+- Scene 3 (0:06 - 0:09) PROOF: The interface shown in 'screenshot_tool_live.jpg' fully alive — ${b.after}.
 - Scene 4 (0:09 - 0:10) CTA: Cinematic settle onto ${brandName} branding. On-screen CTA: "${post?.callToAction || `Try ${toolName} Now ➔ Visit ${domain}`}".
 - Camera & Motion: ${angle.camera}. 4K 60fps photorealistic commercial grade.
 - Audio Vibe: ${angle.audio}.`;

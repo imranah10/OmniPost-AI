@@ -1,53 +1,30 @@
 /**
- * carousel.js — Dynamic branded Instagram carousel maker (100% free, canvas).
+ * carousel.js — Carousel CONTENT planner + AI prompt builder.
  *
- * Every image post can become a swipeable 6-slide carousel:
+ * PROMPTS-FIRST (user rule: "carousel ka image mat banaya karo, uske liye
+ * prompt de diya karo"): the app NO LONGER renders carousel images on canvas.
+ * Instead every image post ships a ready-to-paste `carousel_prompt.txt` in the
+ * campaign ZIP — the user generates the swipeable deck in Gemini / ChatGPT /
+ * Midjourney, attaching the tool's live screenshot for brand accuracy.
+ *
+ * Content plan (unchanged): 6 slides —
  *   Slide 1  Cover — big hook + swipe hint
  *   Slides 2-4 — key points extracted from the post's own caption
  *   Slide 5  — USP / proof point
  *   Slide 6  — CTA + domain pill
- *
- * Content is derived DYNAMICALLY from the crawled site + generated post
- * (no hardcoded copy), rendered with the site's real brand palette.
- * Slides render on demand (~10ms each, zero network) and export as
- * PNGs into the campaign ZIP (06_CAROUSELS/).
  */
 
 const BULLETS = /^[✅⚡🔒✨🚀🎯💡🔥📈✓✔🌟]-*\s*/u;
 
-function wrap(ctx, text, maxWidth) {
-  const words = String(text).split(/\s+/).filter(Boolean);
-  const lines = [];
-  let line = '';
-  for (const w of words) {
-    const t = line ? `${line} ${w}` : w;
-    if (ctx.measureText(t).width > maxWidth && line) {
-      lines.push(line);
-      line = w;
-    } else line = t;
-  }
-  if (line) lines.push(line);
-  return lines;
-}
-
-function hexA(hex, a) {
+/** Brand hex → CSS rgb triplet string (for the AI prompt's palette line). */
+function hexRgb(hex) {
   try {
-    const h = hex.replace('#', '');
+    const h = String(hex).replace('#', '');
     const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
-    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+    return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
   } catch {
-    return `rgba(99,102,241,${a})`;
+    return '99, 102, 241';
   }
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
 }
 
 /** Extract punchy key points from the post's own caption (dynamic, no templates). */
@@ -157,211 +134,54 @@ export function buildCarouselSlides(post, strategy, websiteData) {
 }
 
 /**
- * Render ONE branded slide (1080x1350) → PNG dataURL.
+ * Build the copy-paste AI prompt that generates this post's carousel.
+ * (Replaces the old canvas renderer — the user makes the deck in Gemini /
+ * ChatGPT / Midjourney, attaching the tool's live screenshot.)
+ * Returns a plain string meant for the ZIP's carousel_prompt.txt.
  */
-export async function renderCarouselSlide({ slide, palette = [], brand, domain, index, total }) {
-  const W = 1080;
-  const H = 1350;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  const accent = palette[0] || '#6366f1';
-  const accent2 = palette[1] || '#a855f7';
-  const accent3 = palette[2] || '#ec4899';
-
-  // Rich brand-gradient background
-  const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#0a0e1a');
-  bg.addColorStop(0.55, '#101728');
-  bg.addColorStop(1, '#0a0e1a');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
-  // Accent glow blobs (brand colors)
-  const glow = (x, y, r, color, a) => {
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, hexA(color, a));
-    g.addColorStop(1, hexA(color, 0));
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-  };
-  glow(W * 0.85, H * 0.12, 520, accent, 0.22);
-  glow(W * 0.12, H * 0.85, 560, accent2, 0.18);
-  if (slide.kind === 'cover' || slide.kind === 'cta') glow(W * 0.5, H * 0.55, 640, accent3, 0.10);
-
-  // Fine grid dots texture
-  ctx.fillStyle = 'rgba(255,255,255,0.045)';
-  for (let x = 40; x < W; x += 52) {
-    for (let y = 40; y < H; y += 52) {
-      ctx.fillRect(x, y, 3, 3);
-    }
-  }
-
-  // Top brand row
-  ctx.font = '800 34px system-ui, sans-serif';
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(brand.toUpperCase().slice(0, 26), 64, 96);
-  ctx.font = '600 24px system-ui, sans-serif';
-  ctx.fillStyle = hexA(accent, 0.9);
-  ctx.textAlign = 'right';
-  ctx.fillText(slide.kicker.toUpperCase().slice(0, 30), W - 64, 94);
-  ctx.textAlign = 'left';
-  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(64, 126);
-  ctx.lineTo(W - 64, 126);
-  ctx.stroke();
-
-  const contentTop = 300;
-  const maxW = W - 128;
-
-  if (slide.kind === 'cover') {
-    // Giant hook typography
-    let size = 92;
-    let lines;
-    do {
-      ctx.font = `800 ${size}px system-ui, sans-serif`;
-      lines = wrap(ctx, slide.headline, maxW).slice(0, 5);
-      size -= 6;
-    } while (lines.length >= 5 && size > 56);
-
-    let y = contentTop + size;
-    for (const line of lines) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(line, 64, y);
-      y += size * 1.16;
-    }
-
-    // Accent underline bar
-    const barY = y + 36;
-    const barW = Math.min(W - 128, 220 + lines.length * 40);
-    const bar = ctx.createLinearGradient(64, barY, 64 + barW, barY);
-    bar.addColorStop(0, accent);
-    bar.addColorStop(1, accent2);
-    ctx.fillStyle = bar;
-    roundRect(ctx, 64, barY, barW, 14, 7);
-    ctx.fill();
-
-    // Swipe hint
-    ctx.font = '600 38px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText(slide.body || 'Swipe →', 64, barY + 110);
-  } else if (slide.kind === 'point') {
-    // Number chip
-    const num = String(index).padStart(2, '0');
-    ctx.font = '800 30px system-ui, sans-serif';
-    const chip = `0${num}`.slice(-3);
-    ctx.fillStyle = hexA(accent, 0.2);
-    roundRect(ctx, 64, contentTop - 80, 150, 92, 24);
-    ctx.fill();
-    ctx.strokeStyle = hexA(accent, 0.65);
-    ctx.lineWidth = 2.5;
-    roundRect(ctx, 64, contentTop - 80, 150, 92, 24);
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(chip, 92, contentTop - 18);
-
-    // Point headline
-    let size = 72;
-    let lines;
-    do {
-      ctx.font = `800 ${size}px system-ui, sans-serif`;
-      lines = wrap(ctx, slide.headline, maxW).slice(0, 6);
-      size -= 5;
-    } while (lines.length >= 6 && size > 44);
-
-    let y = contentTop + 120;
-    for (const line of lines) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(line, 64, y);
-      y += size * 1.18;
-    }
-  } else if (slide.kind === 'usp') {
-    ctx.font = '800 64px system-ui, sans-serif';
-    ctx.fillStyle = hexA(accent2, 1);
-    ctx.fillText('“', 56, contentTop + 20);
-    let size = 64;
-    let lines;
-    do {
-      ctx.font = `700 ${size}px system-ui, sans-serif`;
-      lines = wrap(ctx, slide.headline, maxW).slice(0, 6);
-      size -= 4;
-    } while (lines.length >= 6 && size > 40);
-    let y = contentTop + 130;
-    for (const line of lines) {
-      ctx.fillStyle = 'rgba(255,255,255,0.94)';
-      ctx.fillText(line, 64, y);
-      y += size * 1.2;
-    }
-  } else if (slide.kind === 'cta') {
-    ctx.font = '800 84px system-ui, sans-serif';
-    let lines = wrap(ctx, slide.headline, maxW).slice(0, 4);
-    if (lines.length >= 4) {
-      ctx.font = '800 68px system-ui, sans-serif';
-      lines = wrap(ctx, slide.headline, maxW).slice(0, 4);
-    }
-    let y = contentTop + 60;
-    for (const line of lines) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(line, 64, y);
-      y += 100;
-    }
-
-    // Domain pill
-    if (domain) {
-      const pill = `Visit ${domain}`;
-      ctx.font = '700 40px system-ui, sans-serif';
-      const pw = ctx.measureText(pill).width + 76;
-      const pg = ctx.createLinearGradient(64, y + 40, 64 + pw, y + 40);
-      pg.addColorStop(0, accent);
-      pg.addColorStop(1, accent2);
-      ctx.fillStyle = pg;
-      roundRect(ctx, 64, y + 16, pw, 84, 42);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(pill, 102, y + 72);
-    }
-  }
-
-  // Progress dots
-  const dotY = H - 96;
-  const dotGap = 34;
-  const startX = (W - (total - 1) * dotGap) / 2;
-  for (let i = 0; i < total; i++) {
-    if (i === index - 1) {
-      ctx.fillStyle = accent;
-      roundRect(ctx, startX + i * dotGap - 11, dotY - 11, 22, 22, 11);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = 'rgba(255,255,255,0.28)';
-      ctx.beginPath();
-      ctx.arc(startX + i * dotGap, dotY, 7, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  return canvas.toDataURL('image/png');
-}
-
-/** Build + render all slides for a post. Cached on the post object. */
-export async function renderFullCarousel(post, strategy, websiteData) {
-  if (Array.isArray(post.carouselSlides) && post.carouselSlides.length) return post.carouselSlides;
+export function buildCarouselPrompt(post, strategy, websiteData) {
+  const brand = strategy?.brandName || websiteData?.title || 'Brand';
+  const industry = strategy?.industry || 'Technology & Digital Solutions';
+  const domain = websiteData?.domain || '';
+  const palette = Array.isArray(websiteData?.palette) && websiteData.palette.length
+    ? websiteData.palette.slice(0, 3).map((h) => `#${String(h).replace('#', '')} (rgb ${hexRgb(h)})`).join(', ')
+    : '#6366f1, #a855f7, #ec4899';
   const slides = buildCarouselSlides(post, strategy, websiteData);
-  const out = [];
-  for (let i = 0; i < slides.length; i++) {
-    const dataUrl = await renderCarouselSlide({
-      slide: slides[i],
-      palette: websiteData?.palette || [],
-      brand: strategy?.brandName || 'Brand',
-      domain: websiteData?.domain || '',
-      index: i + 1,
-      total: slides.length,
-    });
-    out.push(dataUrl);
-  }
-  post.carouselSlides = out;
-  return out;
+  const tool = post.toolName || brand;
+  const studio = post.studio || 'Core';
+
+  const kindLabel = { cover: 'COVER', point: 'KEY POINT', usp: 'WHY IT WINS', cta: 'CALL TO ACTION' };
+  const slideBlocks = slides.map((s, i) => {
+    const lines = [`SLIDE ${i + 1} — ${kindLabel[s.kind] || 'CONTENT'}`];
+    lines.push(`Kicker (small top label): ${s.kicker || brand}`);
+    if (s.headline) lines.push(`Headline (big bold text): ${s.headline}`);
+    if (s.body) lines.push(`Support line: ${s.body}`);
+    if (s.kind === 'point') lines.push('Add a large number chip (02, 03…) top-left of the text block.');
+    if (s.kind === 'cta') lines.push(`Add a rounded pill button reading: Visit ${domain || brand}`);
+    return lines.join('\n');
+  });
+
+  return `PROMPT FOR GEMINI / CHATGPT / MIDJOURNEY — CAROUSEL DECK (${slides.length} SLIDES)
+(💡 TIP: Attach 'screenshot_tool_live.jpg' — the live UI of ${tool} — alongside this
+prompt so the slides match the real brand typography, colors and product.)
+
+Create a ${slides.length}-slide swipeable Instagram carousel for "${brand}" (${industry}),
+promoting the capability "${tool}" (${studio}).
+
+CANVAS & STYLE RULES
+- Size: 1080 x 1350 px portrait (4:5), one image per slide, numbered in order.
+- One consistent visual system across ALL slides: dark premium background,
+  brand-gradient accents in ${palette}, generous margins, crisp sans-serif
+  headline typography, subtle progress dots bottom-center (dot ${1} of ${slides.length} highlighted per slide).
+- No watermarks, no stock-photo clichés, keep text large and readable.
+
+SLIDE-BY-SLIDE CONTENT (use exactly this copy)
+
+${slideBlocks.join('\n\n')}
+
+HOW TO USE
+1. Generate each slide separately ("Slide 1", "Slide 2", …) and save them as
+   slide-01.png … slide-0${slides.length}.png.
+2. Post them in order as a carousel on ${post.platform || 'Instagram'}.
+3. Copy the caption + hashtags from 'post_ready_to_publish.txt' in this folder.`;
 }

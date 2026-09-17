@@ -212,7 +212,7 @@ async function discoverSitemapUrls(origin) {
   const rank = (u) => {
     const path = u.replace(/^https?:\/\/[^/]+/, '').toLowerCase();
     if (path === '/' || path === '') return 0;
-    if (/(studio|tool|product|app|feature|category|suite)s?\//.test(path)) return 1;
+    if (/(studio|tool|product|app|feature|category|suite|service|solution|generator|converter|calculator|utility)s?\//.test(path)) return 1;
     if (/blog|news|article|post\//.test(path)) return 3;
     return 2;
   };
@@ -221,7 +221,14 @@ async function discoverSitemapUrls(origin) {
 
 /** Crawl a list of URLs in gentle batches, each URL bounded by a HARD
  *  deadline (Promise.race) so one dead proxy chain can never stall the whole
- *  deep-crawl. Stragglers are dropped silently. */
+ *  deep-crawl. Stragglers are dropped silently.
+ *  UNIVERSAL-URL RULE: if a page's raw HTML comes back EMPTY/THIN (React/Vue
+ *  SPA shells, bot-challenge pages), the SAME url is re-fetched through the
+ *  r.jina.ai Reader which renders JavaScript — so client-rendered sites work
+ *  end-to-end instead of yielding "0 tools found". */
+const isThinPage = (p) =>
+  !p || (!p.h1s?.length && !p.h2s?.length && (p.internal?.length || 0) < 3 && String(p.rawSummary || '').length < 300);
+
 async function crawlBatched(urls, { batchSize = 9, gapMs = 300, perUrlDeadlineMs = 15000, onBatch = () => {} } = {}) {
   const grab = async (l) => {
     const timer = new Promise((resolve) => setTimeout(() => resolve(null), perUrlDeadlineMs));
@@ -234,7 +241,18 @@ async function crawlBatched(urls, { batchSize = 9, gapMs = 300, perUrlDeadlineMs
         return p;
       } catch { return null; }
     })();
-    return Promise.race([work, timer]);
+    let p = await Promise.race([work, timer]);
+    if (isThinPage(p)) {
+      try {
+        const md = await Promise.race([
+          readerText(l, { timeout: 22000 }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 23000)),
+        ]);
+        if (md) p = parseMarkdownPage(md, l) || p;
+        if (p) p.url = l;
+      } catch { /* keep whatever the first pass produced */ }
+    }
+    return p;
   };
   const pages = [];
   for (let i = 0; i < urls.length; i += batchSize) {
@@ -266,28 +284,49 @@ function deriveStructure(pages, domain) {
     });
   };
 
-  // ── PASS 1 (TRUTH): schema.org ItemList JSON-LD — the site's own machine-
-  // readable tool registry. Studio tool grids are client-rendered, so this is
-  // usually the ONLY place the real per-tool inventory is visible. Parsed for
-  // ANY site that ships it — try/catch per block, malformed data is skipped.
+  // ── PASS 1 (TRUTH): schema.org structured data — the site's own machine-
+  // readable tool registry. Studio/tool grids are often client-rendered, so
+  // this is frequently the ONLY place the real per-tool inventory is visible.
+  // Parsed for ANY site that ships it — try/catch per block, malformed data is
+  // skipped. Supported shapes (all common on the modern web):
+  //   - ItemList / itemListElement (tool & studio registries)
+  //   - SoftwareApplication / WebApplication / MobileApplication / Product /
+  //     Service nodes (single-tool pages)
+  //   - @graph containers (Next.js / Yoast / modern SEO plugins wrap everything)
+  const TOOL_LD_TYPES = new Set(['SoftwareApplication', 'WebApplication', 'MobileApplication', 'Product', 'Service']);
+  const collectLdNodes = (data, out) => {
+    if (Array.isArray(data)) {
+      data.forEach((d) => collectLdNodes(d, out));
+      return;
+    }
+    if (!data || typeof data !== 'object') return;
+    out.push(data);
+    if (Array.isArray(data['@graph'])) data['@graph'].forEach((g) => collectLdNodes(g, out));
+  };
   for (const p of pages) {
     for (const raw of p.ldJson || []) {
       try {
-        const data = JSON.parse(raw);
-        const nodes = Array.isArray(data) ? data : [data];
+        const nodes = [];
+        collectLdNodes(JSON.parse(raw), nodes);
         for (const node of nodes) {
           if (!node || typeof node !== 'object') continue;
-          if (node['@type'] !== 'ItemList' || !Array.isArray(node.itemListElement)) continue;
           const studioGuess = p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform';
-          if (studioGuess && !studios.includes(studioGuess)) studios.push(studioGuess);
-          for (const el of node.itemListElement) {
-            const name = typeof el === 'string' ? el : (el && (el.name || (el.item && el.item.name)));
-            if (!name || typeof name !== 'string') continue;
-            const desc = typeof el === 'object' && el && (typeof el.description === 'string'
-              ? el.description
-              : (el.item && typeof el.item.description === 'string' ? el.item.description : ''));
-            const href = typeof el === 'object' && el && (el.url || (el.item && el.item.url));
-            pushTool(name, studioGuess, desc || `${name} on ${domain}`, href || p.url);
+          if (node['@type'] === 'ItemList' && Array.isArray(node.itemListElement)) {
+            if (studioGuess && !studios.includes(studioGuess)) studios.push(studioGuess);
+            for (const el of node.itemListElement) {
+              const name = typeof el === 'string' ? el : (el && (el.name || (el.item && el.item.name)));
+              if (!name || typeof name !== 'string') continue;
+              const desc = typeof el === 'object' && el && (typeof el.description === 'string'
+                ? el.description
+                : (el.item && typeof el.item.description === 'string' ? el.item.description : ''));
+              const href = typeof el === 'object' && el && (el.url || (el.item && el.item.url));
+              pushTool(name, studioGuess, desc || `${name} on ${domain}`, href || p.url);
+            }
+          } else {
+            const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+            if (!types.some((t) => TOOL_LD_TYPES.has(t))) continue;
+            if (!node.name || typeof node.name !== 'string') continue;
+            pushTool(node.name, studioGuess, typeof node.description === 'string' ? node.description : `${node.name} on ${domain}`, node.url || p.url);
           }
         }
       } catch { /* malformed JSON-LD — skip */ }
@@ -302,7 +341,7 @@ function deriveStructure(pages, domain) {
     }
     // URL-slug signals: a tool= query param is a per-tool address
     // (/studio/pdf?tool=timemachine → "Time Machine"-style entries); deep
-    // multi-segment tool paths (/tool/x, /studios/pdf/merge) count too.
+    // multi-segment tool paths (/tool/x, /products/pdf/merge) count too.
     try {
       const u = new URL(p.url);
       const path = u.pathname;
@@ -312,16 +351,27 @@ function deriveStructure(pages, domain) {
         const idName = toolParam.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
         const studioGuess = p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || (segs[1] || '').replace(/\b\w/, (c) => c.toUpperCase());
         if (idName && !JUNK_TOOL_NAME.test(idName)) pushTool(idName, studioGuess, p.description || `${idName} on ${domain}`, p.url);
-      } else if (segs.length >= 3 && /^(tool|tools|studio|studios|category|app|apps|feature|features|product|products|suite|suites)/i.test(path)) {
-        const slugName = segs[segs.length - 1]
-          .replace(/\.(html?|php)$/i, '')
-          .replace(/[-_]+/g, ' ')
-          .replace(/\b\w/g, (c) => c.toUpperCase())
-          .trim();
-        const studioGuess = segs.slice(0, -1).join(' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 30);
-        if (slugName && slugName.split(' ').length <= 7 && !JUNK_TOOL_NAME.test(slugName)) {
-          pushTool(slugName, studioGuess, p.description || `${slugName} on ${domain}`, p.url);
-          if (!studios.includes(studioGuess)) studios.push(studioGuess);
+      } else if (segs.length >= 2) {
+        // SITEMAP-DRIVEN tool URLs (no link anchor needed — the sitemap already
+        // told us this page exists). NOTE: the old regex tested `^(tool|…)`
+        // against a path that ALWAYS starts with '/', so this branch never
+        // fired — sitemap-only sites silently lost most of their tools.
+        const first = (segs[0] || '').toLowerCase();
+        if (/^(tool|tools|app|apps|product|products|service|services|solution|solutions|feature|features|generator|generators|converter|converters|calculator|calculators|utility|utilities|suite|suites|maker|makers|category|categories|platform)$/.test(first)) {
+          const slugName = segs[segs.length - 1]
+            .replace(/\.(html?|php)$/i, '')
+            .replace(/[-_]+/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase())
+            .trim();
+          const studioGuess = (segs.length >= 3
+            ? segs.slice(0, -1).join(' ')
+            : first)
+            .replace(/\b\w/g, (c) => c.toUpperCase())
+            .slice(0, 30);
+          if (slugName && slugName.split(' ').length <= 7 && !JUNK_TOOL_NAME.test(slugName)) {
+            pushTool(slugName, studioGuess, p.description || `${slugName} on ${domain}`, p.url);
+            if (!studios.includes(studioGuess)) studios.push(studioGuess);
+          }
         }
       }
     } catch { /* malformed URL — skip */ }
@@ -335,7 +385,7 @@ function deriveStructure(pages, domain) {
         if (!l.name || l.name.length > 32 || /arrow_forward|free no signup|^\s*try\s/i.test(l.name) || /[a-z]{4,}[A-Z]/.test(l.name)) continue;
         const u = new URL(l.href);
         const path = u.pathname;
-        if (!/^(\/)(tool|tools|studio|category|app|feature|product)s?\//i.test(path) || !l.name) continue;
+        if (!/^\/(free-|ai-|web-|online-)?(tool|tools|studio|studios|category|app|apps|feature|features|product|products|service|services|solution|solutions|platform|suite|suites|generator|generators|converter|converters|calculator|calculators|utility|utilities|maker|makers)s?\//i.test(path) || !l.name) continue;
         const toolParam = u.searchParams.get('tool') || new URLSearchParams(u.hash.replace(/^#/, '')).get('tool');
         if (toolParam) {
           const idName = toolParam.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
@@ -493,7 +543,7 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 
   // legal pages, contact/footer links are NEVER screenshotted — the ZIP's
   // day folders pair each post with the screenshot of ITS OWN tool, so a
   // wrong-page capture here would poison the whole kit downstream.
-  const JUNK_SHOT_PATH = /\/(blog|privacy|terms|about|contact|api-docs|sponsors|category|tag)(\/|$)/i;
+  const JUNK_SHOT_PATH = /\/(blog|privacy|terms|about|contact|api-docs|sponsors|tag)(\/|$)/i;
   const shotCap = 30;
 
   const slugOf = (id) => String(id || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'tool';

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { generateLanguagePack } from '../lib/aiClient.js';
 import MasterStudioModal from './MasterStudioModal.jsx';
-import { renderFullCarousel } from '../lib/carousel.js';
+import { buildCarouselPrompt } from '../lib/carousel.js';
 import { API_BASE } from '../config.js';
 import { proxyImageBlob } from '../lib/net.js';
 import { shotForTool } from '../lib/shotMatch.js';
@@ -444,22 +444,26 @@ FILES INCLUDED (${shotsToBundle.length} Total):
 ${shotsToBundle.map(s => `- ${s.fileName}: ${s.title} (${s.description})`).join('\n')}
 
 DAY FOLDER PAIRING:
-Every Day folder (Day-X_Platform_ToolName) contains screenshot_before_input.jpg,
-screenshot_after_output.jpg and raw_screenshot.jpg — ALL three are the live
-capture of THAT folder's own tool (or its studio overview if a per-tool capture
-is unavailable). The folder name and the images inside always describe the SAME
-tool now.
+Every Day folder (Day-X_Platform_ToolName) contains ONE live screenshot —
+screenshot_tool_live.jpg — of THAT folder's own tool (or its studio overview
+if a per-tool capture is unavailable). The folder name and the image inside
+always describe the SAME tool. Duplicate before/after copies are gone: when
+the input and output captures are identical, you get exactly ONE file.
 
 HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
 1. FOR IMAGES (ChatGPT / Gemini / Midjourney):
-   - Upload the day folder's screenshot_before_input.jpg (or the tool-*.jpg from
+   - Upload the day folder's screenshot_tool_live.jpg (or the tool-*.jpg from
      here) alongside the post's ai_image_prompt.txt
    - Instruct the AI: "Match the exact typography, color scheme, and UI layout shown in this screenshot."
 
 2. FOR VIDEOS (Higgsfield / Runway / Luma / Sora):
-   - Upload the day folder's screenshot_before_input.jpg as the Starting Frame / Image-to-Video source.
+   - Upload the day folder's screenshot_tool_live.jpg as the Starting Frame / Image-to-Video source.
    - Paste the prompt from 'ai_video_prompt.txt'.
    - The AI will animate the real interface without hallucinating generic elements!
+
+3. FOR CAROUSELS (Instagram / LinkedIn swipeable decks):
+   - Copy the post's carousel_prompt.txt into Gemini / ChatGPT / Midjourney
+     (attach screenshot_tool_live.jpg too) and generate slide-01.png … slide-06.png.
 ================================================================================`;
       allShotsFolder.file("README_SCREENSHOTS.txt", readmeContent);
 
@@ -498,7 +502,7 @@ BEST PUBLISHING TIME: ${p.bestTime || '9:00 AM'}
 
 HOW TO POST THIS POST (4 STEPS):
 1. Open 'ai_image_prompt.txt' — copy the prompt, paste it into the Gemini app /
-   ChatGPT / Midjourney (attach 'screenshot_before_input.jpg' for a 100%
+   ChatGPT / Midjourney (attach 'screenshot_tool_live.jpg' for a 100%
    brand-accurate visual) — save the generated photo or video.
 2. Come back here — copy the FULL POST CAPTION + HASHTAGS below.
 3. Open ${p.platform}, create the post, attach your generated visual.
@@ -524,7 +528,7 @@ Publish on ${p.platform} at ${p.bestTime || '9:00 AM'} for maximum reach and eng
 
         // b) ai_image_prompt.txt (UNIQUE per post — visual angle rotation)
         const imgPromptText = p.imagePrompt || p.aiImagePrompt || `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
-(💡 TIP: Attach 'raw_screenshot.jpg' alongside this prompt into ChatGPT or Gemini for 100% brand UI matching!)
+(💡 TIP: Attach 'screenshot_tool_live.jpg' alongside this prompt into ChatGPT or Gemini for 100% brand UI matching!)
 
 Create a high-converting, photorealistic commercial product advertising hero visual for "${strategy.brandName}" (${strategy.industry}).
 - Subject: A sleek glassmorphic 3D device mockup showcasing "${p.toolName}" from the "${p.studio || 'Core'}" section.
@@ -534,7 +538,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
         // c) ai_video_prompt.txt
         const vidPromptText = p.aiVideoPrompt || `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA:
-(💡 TIP: Upload 'raw_screenshot.jpg' or 'visual_creative.png' as the starting frame / image-to-video source)
+(💡 TIP: Upload 'screenshot_tool_live.jpg' or 'visual_creative.png' as the starting frame / image-to-video source)
 
 9:16 vertical social video commercial reel.
 - Scene 1 (0-2s): Fast cinematic macro zoom-in to the "${p.toolName}" interface on ${strategy.brandName}.
@@ -563,48 +567,33 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         // d2) (AI media bundling removed — visuals are made outside the app
         //     with the bundled prompts; see HOW TO POST steps in each txt)
 
-        // e) Before (Input) and After (Output) live screenshots —
-        //    ALWAYS the screenshot of THIS post's own tool. The old code
-        //    cycled through ALL captured pages by modulo index, so a folder
-        //    named after one tool contained a screenshot of a blog/legal/other
-        //    page — folder name and image content never matched.
+        // e) Live screenshot — ONE file per tool. The old code wrote the SAME
+        //    capture up to three times (before/after/raw). Deduped by URL: a
+        //    single screenshot_tool_live.jpg unless input/output genuinely
+        //    differ, in which case the before/after pair is kept.
         const matchedShot = shotForTool(websiteData, { toolName: p.toolName, studio: p.studio, toolUrl: p.toolUrl });
         const inputUrl = p.inputScreenshotUrl || matchedShot?.webUrl || '';
         const outputUrl = p.outputScreenshotUrl || matchedShot?.webUrl || p.screenshotUrl || '';
+        const rawUrl = p.screenshotUrl || matchedShot?.webUrl || outputUrl || inputUrl || '';
 
-        if (inputUrl) {
+        const writeShot = async (name, url) => {
+          if (!url) return;
           try {
-            const inBlob = await getBlobCached(inputUrl);
-            if (inBlob) {
-              dayFolder.file("screenshot_before_input.jpg", inBlob);
-            }
+            const blob = await getBlobCached(url);
+            if (blob) dayFolder.file(name, blob);
           } catch (err) {
-            console.warn(`Could not bundle input screenshot for ${p.day}:`, err.message);
+            console.warn(`Could not bundle ${name} for ${p.day}:`, err.message);
           }
-        }
+        };
 
-        if (outputUrl) {
-          try {
-            const outBlob = await getBlobCached(outputUrl);
-            if (outBlob) {
-              dayFolder.file("screenshot_after_output.jpg", outBlob);
-            }
-          } catch (err) {
-            console.warn(`Could not bundle output screenshot for ${p.day}:`, err.message);
+        if (inputUrl && outputUrl && inputUrl !== outputUrl) {
+          await writeShot('screenshot_before_input.jpg', inputUrl);
+          await writeShot('screenshot_after_output.jpg', outputUrl);
+          if (rawUrl && rawUrl !== inputUrl && rawUrl !== outputUrl) {
+            await writeShot('raw_screenshot.jpg', rawUrl);
           }
-        }
-
-        // e2) raw_screenshot.jpg (Primary live proof — THIS post's own tool UI)
-        const shotUrl = p.screenshotUrl || matchedShot?.webUrl || outputUrl || inputUrl || '';
-        if (shotUrl) {
-          try {
-            const shotBlob = await getBlobCached(shotUrl);
-            if (shotBlob) {
-              dayFolder.file("raw_screenshot.jpg", shotBlob);
-            }
-          } catch (err) {
-            console.warn(`Could not bundle raw screenshot for ${p.day}:`, err.message);
-          }
+        } else {
+          await writeShot('screenshot_tool_live.jpg', rawUrl || outputUrl || inputUrl);
         }
 
         // f) If video post: video_reel.webm/.mp4 and video_script.md
@@ -640,17 +629,14 @@ Create a high-converting, photorealistic commercial product advertising hero vis
           }
         }
 
-        // g) Branded carousel slides — every image post ships as a ready-to-post
-        //    swipeable carousel (rendered on-canvas with the live brand palette)
+        // g) Carousel PROMPT — every image post ships a copy-paste prompt that
+        //    generates the swipeable deck in Gemini / ChatGPT / Midjourney
+        //    (no canvas-rendered carousel images — user rule: prompt do, image nahi)
         if (!p.contentType?.includes('Video') && !p.videoScript) {
           try {
-            const slides = await renderFullCarousel(p, strategy, websiteData);
-            for (let si = 0; si < slides.length; si++) {
-              const sBlob = await (await fetch(slides[si])).blob();
-              dayFolder.file(`carousel_slide_${si + 1}.png`, sBlob);
-            }
+            dayFolder.file('carousel_prompt.txt', buildCarouselPrompt(p, strategy, websiteData));
           } catch (err) {
-            console.warn(`Could not bundle carousel for ${p.day}:`, err.message);
+            console.warn(`Could not build carousel prompt for ${p.day}:`, err.message);
           }
         }
       }
@@ -1149,7 +1135,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                             </button>
                           </div>
                           <p className="text-[10px] text-slate-400 italic mb-1">
-                            💡 Attach <code className="text-amber-300 font-mono">screenshot_before_input.jpg</code> & <code className="text-emerald-300 font-mono">screenshot_after_output.jpg</code> for authentic Before/After commercial visual!
+                            💡 Attach <code className="text-amber-300 font-mono">screenshot_tool_live.jpg</code> (this tool's real UI) for an authentic, brand-accurate visual!
                           </p>
                           <pre className="p-2 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-24 overflow-y-auto">
                             {post.imagePrompt || post.aiImagePrompt}
@@ -1181,7 +1167,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                             </button>
                           </div>
                           <p className="text-[10px] text-slate-400 italic mb-1">
-                            💡 Start Frame: <code className="text-amber-300 font-mono">screenshot_before_input.jpg</code> ➔ Climax Frame: <code className="text-emerald-300 font-mono">screenshot_after_output.jpg</code>!
+                            💡 Start Frame: upload <code className="text-amber-300 font-mono">screenshot_tool_live.jpg</code> as the image-to-video source!
                           </p>
                           <pre className="p-2 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-24 overflow-y-auto">
                             {post.aiVideoPrompt || `9:16 vertical video reel showing dynamic execution of ${post.toolName} on ${strategy.brandName}`}
