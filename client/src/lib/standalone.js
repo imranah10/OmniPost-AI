@@ -3,13 +3,14 @@
  * Mirrors the two server endpoints (/api/analyze, /api/generate-campaign)
  * with progress callbacks so the UI stays identical in standalone mode.
  *
- * Campaign flow is split in two phases for fast UX:
- *   1. copy/plan generation (fast — returns posts immediately)
- *   2. fillImages() — sequential AI art + branded cards with progress
+ * PROMPTS-FIRST: campaign generation returns copy + prompts only. No media is
+ * rendered in the background — the user creates visuals from the per-post
+ * prompts (Gemini app / ChatGPT / Midjourney) or via the full-campaign ZIP
+ * workflow. Per-post Gemini/Veo generation inside the AI Prompts drawer is
+ * the only in-app media path, and it is strictly user-initiated.
  */
 import { analyzeSite } from './analyzer.js';
 import { analyzeWebsiteStrategy, generateFullCampaign, generateMasterBrandBlueprint } from './aiClient.js';
-import { generatePostCreatives } from './creatives.js';
 
 export async function standaloneAnalyze(url, { customPrompt = '', geminiApiKey = '', onStep = () => {} } = {}) {
   const websiteData = await analyzeSite(url, { onStep });
@@ -52,29 +53,5 @@ export async function standaloneGenerateCampaign({
 
   onPostDone({ phase: 'copy', total: posts.length });
 
-  /**
-   * Phase 2 — run AFTER the dashboard is visible: fills each post with its
-   * AI artwork + branded card. Sequential (Pollinations rate-limits bursts).
-   */
-  const fillImages = async (onImage = () => {}) => {
-    for (let i = 0; i < posts.length; i++) {
-      const post = posts[i];
-      try {
-        const { rawAiUrl, rawBlob, rawObjectUrl, cardDataUrl } = await generatePostCreatives({
-          post, strategy, websiteData, index: i + 1,
-        });
-        post.remoteAiUrl = rawAiUrl;
-        post.rawBlob = rawBlob || null;          // blob for instant ZIP packing
-        post.generatedImageUrl = rawObjectUrl || post.generatedImageUrl;
-        post.rawAiUrl = rawObjectUrl || post.rawAiUrl;
-        post.cardDataUrl = cardDataUrl || null;
-        onImage({ index: i + 1, total: posts.length, post, done: true });
-      } catch {
-        onImage({ index: i + 1, total: posts.length, post, done: false });
-      }
-    }
-    return posts;
-  };
-
-  return { posts, masterBrandPrompt, masterImagePrompt, masterVideoPrompt, masterBlueprint, fillImages };
+  return { posts, masterBrandPrompt, masterImagePrompt, masterVideoPrompt, masterBlueprint };
 }

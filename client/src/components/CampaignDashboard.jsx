@@ -3,23 +3,14 @@ import JSZip from 'jszip';
 import confetti from 'canvas-confetti';
 import { 
   Sparkles, 
-  Calendar, 
-  Download, 
   Copy, 
   Check, 
   Video, 
   Image as ImageIcon, 
-  Share2, 
-  Layers, 
-  Filter, 
-  FileSpreadsheet, 
   Archive,
   RefreshCw,
-  ExternalLink,
-  Play,
   ChevronDown,
   ChevronUp,
-  GalleryHorizontal,
   AlertTriangle,
   Globe,
   Wand2,
@@ -28,8 +19,6 @@ import {
 } from 'lucide-react';
 import { generateLanguagePack } from '../lib/aiClient.js';
 import { generateAIImage, generateAIVideo, cleanPrompt } from '../lib/aiMedia.js';
-import VideoReelModal from './VideoReelModal.jsx';
-import CarouselModal from './CarouselModal.jsx';
 import MasterStudioModal from './MasterStudioModal.jsx';
 import { renderFullCarousel } from '../lib/carousel.js';
 import { API_BASE } from '../config.js';
@@ -150,7 +139,6 @@ export default function CampaignDashboard({
   onReset 
 }) {
   const [activeTab, setActiveTab] = useState('all');
-  const [selectedVideoPost, setSelectedVideoPost] = useState(null);
   const [copiedPostId, setCopiedPostId] = useState(null);
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedMasterPrompt, setCopiedMasterPrompt] = useState(false);
@@ -162,8 +150,6 @@ export default function CampaignDashboard({
   const [expandedPromptPostId, setExpandedPromptPostId] = useState(null);
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'calendar'
-  const [mediaViewMode, setMediaViewMode] = useState({}); // { [postId]: 'poster' | 'ai' | 'screenshot' }
-  const [carouselPost, setCarouselPost] = useState(null);
   const [langPack, setLangPack] = useState(null);
   const [langState, setLangState] = useState('idle'); // 'idle' | 'loading' | 'ready' | 'error'
   const [langError, setLangError] = useState('');
@@ -766,38 +752,6 @@ Create a high-converting, photorealistic commercial product advertising hero vis
     }
   };
 
-  const handleDownloadSingleImage = async (post) => {
-    try {
-      const mode = mediaViewMode[post.id] || 'poster';
-      let targetUrl = post.generatedImageUrl;
-      let suffix = 'visual';
-      if (mode === 'ai' && post.rawAiUrl) {
-        targetUrl = post.rawAiUrl;
-        suffix = 'ai_art';
-      } else if (mode === 'input' && post.inputScreenshotUrl) {
-        targetUrl = post.inputScreenshotUrl;
-        suffix = 'before_input_state';
-      } else if (mode === 'output' && (post.outputScreenshotUrl || post.screenshotUrl)) {
-        targetUrl = post.outputScreenshotUrl || post.screenshotUrl;
-        suffix = 'after_live_output';
-      } else if (mode === 'screenshot' && post.screenshotUrl) {
-        targetUrl = post.screenshotUrl;
-        suffix = 'screenshot';
-      }
-
-      const blob = await proxyImageBlob(targetUrl);
-      if (!blob) throw new Error('could not fetch');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${post.day}_${strategy.brandName}_${suffix}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      window.open(post.generatedImageUrl, '_blank');
-    }
-  };
-
   const loadLanguages = async () => {
     if (langState === 'loading') return;
     if (!geminiApiKey) {
@@ -1149,128 +1103,24 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                 key={post.id}
                 className="rounded-3xl glass-panel border border-slate-800/80 overflow-hidden flex flex-col hover:border-indigo-500/40 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 text-left group"
               >
-                {/* Visual Header / Media */}
-                <div className="relative aspect-square bg-slate-950 overflow-hidden">
-                  {/* View Mode Switcher on card */}
-                  {(post.rawAiUrl || post.inputScreenshotUrl || post.outputScreenshotUrl || post.screenshotUrl) && (
-                    <div className="absolute top-10 inset-x-3 flex items-center gap-1 z-20 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setMediaViewMode(prev => ({ ...prev, [post.id]: 'poster' })); }}
-                        className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer backdrop-blur-md ${
-                          (mediaViewMode[post.id] || 'poster') === 'poster'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'bg-black/60 text-slate-300 hover:text-white'
-                        }`}
-                      >
-                        🎨 AI Poster
-                      </button>
-                      {post.rawAiUrl && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setMediaViewMode(prev => ({ ...prev, [post.id]: 'ai' })); }}
-                          className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer backdrop-blur-md ${
-                            mediaViewMode[post.id] === 'ai'
-                              ? 'bg-purple-600 text-white shadow-sm'
-                              : 'bg-black/60 text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          📸 Pure AI Art
-                        </button>
-                      )}
-                      {post.inputScreenshotUrl && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setMediaViewMode(prev => ({ ...prev, [post.id]: 'input' })); }}
-                          className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer backdrop-blur-md ${
-                            mediaViewMode[post.id] === 'input'
-                              ? 'bg-amber-600 text-white shadow-sm'
-                              : 'bg-black/60 text-amber-300 hover:text-white'
-                          }`}
-                        >
-                          📥 Input State
-                        </button>
-                      )}
-                      {(post.outputScreenshotUrl || post.screenshotUrl) && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setMediaViewMode(prev => ({ ...prev, [post.id]: 'output' })); }}
-                          className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer backdrop-blur-md ${
-                            mediaViewMode[post.id] === 'output'
-                              ? 'bg-emerald-600 text-white shadow-sm'
-                              : 'bg-black/60 text-emerald-300 hover:text-white'
-                          }`}
-                        >
-                          🚀 Live Output
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <img
-                    src={
-                      mediaViewMode[post.id] === 'ai' && post.rawAiUrl
-                        ? post.rawAiUrl
-                        : mediaViewMode[post.id] === 'input' && post.inputScreenshotUrl
-                        ? post.inputScreenshotUrl
-                        : mediaViewMode[post.id] === 'output' && (post.outputScreenshotUrl || post.screenshotUrl)
-                        ? (post.outputScreenshotUrl || post.screenshotUrl)
-                        : mediaViewMode[post.id] === 'screenshot' && post.screenshotUrl
-                        ? post.screenshotUrl
-                        : post.generatedImageUrl
-                    }
-                    alt={post.hook}
-                    className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                    onError={(e) => {
-                      if (post.screenshotFallbackUrl) e.target.src = post.screenshotFallbackUrl;
-                    }}
-                  />
-
-                  {/* Gradient bottom shadow */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent pointer-events-none" />
-
-                  {/* Top Badges */}
-                  <div className="absolute top-3 inset-x-3 flex items-center justify-between">
-                    <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-white text-[11px] font-bold font-mono">
+                {/* Text Header — NO photo/video previews; visuals live in the user's hands */}
+                <div className="px-5 pt-4 pb-3 border-b border-slate-800/60 bg-slate-950/40">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[11px] font-bold font-mono">
                       {post.day}
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-slate-200 text-[11px] font-semibold flex items-center gap-1.5">
-                      {post.platform}
-                    </span>
-                  </div>
-
-                  {/* Video Reel Play Overlay Button */}
-                  {isVideo && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <button
-                        onClick={() => setSelectedVideoPost(post)}
-                        className="w-14 h-14 rounded-full bg-purple-600/90 hover:bg-purple-500 hover:scale-110 text-white flex items-center justify-center shadow-2xl shadow-purple-500/40 backdrop-blur-md transition-all cursor-pointer group/btn"
-                      >
-                        <Play className="w-6 h-6 ml-0.5 fill-white group-hover/btn:scale-110 transition" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Content Type Tag */}
-                  <div className="absolute bottom-3 left-3">
-                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider backdrop-blur-md flex items-center gap-1 ${
+                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 ${
                       isVideo
-                        ? 'bg-purple-900/80 text-purple-200 border border-purple-500/40'
-                        : 'bg-indigo-900/80 text-indigo-200 border border-indigo-500/40'
+                        ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                        : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
                     }`}>
                       {isVideo ? <Video className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
                       {post.contentType}
                     </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300 text-[11px] font-semibold">
+                      {post.platform}
+                    </span>
                   </div>
-
-                  {/* Download Image Button */}
-                  <button
-                    onClick={() => handleDownloadSingleImage(post)}
-                    title="Download Visual Image"
-                    className="absolute bottom-3 right-3 p-2 rounded-xl bg-black/70 hover:bg-black/90 text-white backdrop-blur-md border border-white/10 transition cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                  </button>
                 </div>
 
                 {/* Card Body */}
@@ -1278,7 +1128,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                   
                   {/* Studio & Tool Highlight */}
                   {(post.studio || post.toolName) && (
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap order-1">
                       {post.studio && (
                         <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold">
                           🏛️ {post.studio}
@@ -1293,7 +1143,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                   )}
 
                   {/* Hook */}
-                  <div>
+                  <div className="order-3">
                     <h3 className="font-heading text-base font-bold text-white leading-snug line-clamp-2">
                       {post.hook}
                     </h3>
@@ -1313,28 +1163,8 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                     </div>
                   </div>
 
-                  {/* AI Provider Info */}
-                  <div className="text-[10px] text-slate-400 flex items-center justify-between border-t border-slate-800/50 pt-2">
-                    <span className="truncate flex items-center gap-1 text-slate-300">
-                      <Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />
-                      <span className="truncate">{post.imageProvider || 'OmniPost Visual'}</span>
-                    </span>
-                    {aiMedia[post.id]?.imgUrl && (
-                      <span className="flex items-center gap-1 text-[9px] font-bold text-fuchsia-300 bg-fuchsia-500/15 border border-fuchsia-500/30 px-1.5 py-0.5 rounded-full shrink-0">
-                        <Wand2 className="w-2.5 h-2.5" />
-                        Gemini Visual ✓
-                      </span>
-                    )}
-                    {isVideo && post.videoProvider && (
-                      <span className="truncate flex items-center gap-1 text-purple-300 shrink-0">
-                        <Video className="w-3 h-3 text-purple-400 shrink-0" />
-                        <span>{post.videoProvider}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Expandable AI Prompts Drawer */}
-                  <div className="pt-2 border-t border-slate-800/60">
+                  {/* Expandable AI Prompts Drawer — the star of every card */}
+                  <div className="pt-2 border-t border-slate-800/60 order-2">
                     <button
                       type="button"
                       onClick={() => setExpandedPromptPostId(expandedPromptPostId === post.id ? null : post.id)}
@@ -1504,43 +1334,11 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                     )}
                   </div>
 
-                  {/* Bottom Action Footer */}
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                    {isVideo ? (
-                      <div className="flex items-center gap-2 flex-1">
-                        <button
-                          onClick={() => setSelectedVideoPost(post)}
-                          className="flex-1 py-2 px-3 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/50 text-purple-100 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-lg shadow-purple-500/20"
-                        >
-                          <Play className="w-3.5 h-3.5 text-purple-300 fill-purple-300" />
-                          <span>Watch 9:16 Video Reel</span>
-                        </button>
-                        {post.videoUrl && (
-                          <a
-                            href={post.videoUrl}
-                            download={`${post.day}_${post.toolName || 'reel'}.mp4`}
-                            className="p-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 transition cursor-pointer shrink-0"
-                            title="Download Video Reel (.MP4)"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className="text-[11px] text-slate-400 line-clamp-1 flex-1" title={post.callToAction}>
-                          {post.callToAction}
-                        </span>
-                        <button
-                          onClick={() => setCarouselPost(post)}
-                          className="flex items-center gap-1.5 py-2 px-3 rounded-xl bg-pink-600/20 hover:bg-pink-600/40 border border-pink-500/40 text-pink-200 text-xs font-semibold transition cursor-pointer shrink-0"
-                          title="Open branded carousel preview (auto-built from this post)"
-                        >
-                          <GalleryHorizontal className="w-3.5 h-3.5" />
-                          <span>Carousel</span>
-                        </button>
-                      </div>
-                    )}
+                  {/* Bottom Action Footer — copy & go; media is made from prompts */}
+                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2 order-4">
+                    <span className="text-[11px] text-slate-400 line-clamp-1 flex-1" title={post.callToAction}>
+                      {post.callToAction}
+                    </span>
 
                     <button
                       onClick={() => handleCopyCaption(post)}
@@ -1570,20 +1368,13 @@ Create a high-converting, photorealistic commercial product advertising hero vis
               key={post.id}
               className="p-5 rounded-2xl glass-panel border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-indigo-500/40 transition text-left"
             >
-              {/* Day & Visual */}
+              {/* Day & Post — text only */}
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0">
-                  <img
-                    src={post.generatedImageUrl}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
+                <div className="w-16 h-16 rounded-xl bg-indigo-500/10 border border-indigo-500/30 shrink-0 flex items-center justify-center">
+                  <span className="font-heading text-xs font-black text-indigo-300 text-center leading-tight px-1">{post.day}</span>
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-heading text-sm font-extrabold text-white">
-                      {post.day}
-                    </span>
                     <span className="text-xs px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-medium">
                       {post.platform}
                     </span>
@@ -1599,15 +1390,6 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 
               {/* Actions */}
               <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-                {post.videoScript && (
-                  <button
-                    onClick={() => setSelectedVideoPost(post)}
-                    className="px-3.5 py-1.5 rounded-xl bg-purple-600/20 text-purple-200 hover:bg-purple-600/30 text-xs font-semibold border border-purple-500/30 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Video className="w-3.5 h-3.5" />
-                    <span>View Reel</span>
-                  </button>
-                )}
                 <button
                   onClick={() => handleCopyCaption(post)}
                   className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
@@ -1621,42 +1403,11 @@ Create a high-converting, photorealistic commercial product advertising hero vis
         </div>
       )}
 
-      {/* Carousel Preview Modal */}
-      {carouselPost && (
-        <CarouselModal
-          post={carouselPost}
-          strategy={strategy}
-          websiteData={websiteData}
-          onClose={() => setCarouselPost(null)}
-        />
-      )}
-
-      {/* Video Reel Modal */}
-      {selectedVideoPost && (
-        <VideoReelModal
-          isOpen={Boolean(selectedVideoPost)}
-          onClose={() => setSelectedVideoPost(null)}
-          post={selectedVideoPost}
-          brandName={strategy.brandName}
-          higgsfieldApiKey={higgsfieldApiKey}
-          strategy={strategy}
-          websiteData={websiteData}
-        />
-      )}
-
       {/* Master AI Prompts Studio Modal */}
       {isMasterStudioOpen && (
         <MasterStudioModal
           isOpen={isMasterStudioOpen}
           onClose={() => setIsMasterStudioOpen(false)}
-          strategy={strategy}
-          websiteData={websiteData}
-          masterBrandPrompt={effectiveMasterBrandPrompt}
-          masterImagePrompt={effectiveMasterImagePrompt}
-          masterVideoPrompt={effectiveMasterVideoPrompt}
-          masterBlueprint={effectiveMasterBrandBlueprint}
-          onDownloadScreenshotsZip={handleDownloadScreenshotsZip}
-          isDownloadingScreenshotsZip={isDownloadingScreenshotsZip}
         />
       )}
 

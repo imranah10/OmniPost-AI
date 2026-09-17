@@ -13,7 +13,6 @@ import {
   Info,
   Download,
   ShieldCheck,
-  FolderDown,
   Monitor
 } from 'lucide-react';
 import { getUnifiedScreenshots } from './CampaignDashboard.jsx';
@@ -28,9 +27,7 @@ export default function MasterStudioModal({
   masterBrandPrompt,
   masterImagePrompt,
   masterVideoPrompt,
-  masterBlueprint,
-  onDownloadScreenshotsZip,
-  isDownloadingScreenshotsZip
+  masterBlueprint
 }) {
   const [activeTab, setActiveTab] = useState('blueprint'); // 'blueprint' | 'image' | 'video' | 'screenshots' | 'brief'
   const [copiedType, setCopiedType] = useState(null);
@@ -102,28 +99,6 @@ export default function MasterStudioModal({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {onDownloadScreenshotsZip && (
-              <button
-                type="button"
-                disabled={isDownloadingScreenshotsZip}
-                onClick={onDownloadScreenshotsZip}
-                className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition cursor-pointer disabled:opacity-60"
-                title="Download all screenshots and blueprint as ZIP"
-              >
-                {isDownloadingScreenshotsZip ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Downloading ZIP...</span>
-                  </>
-                ) : (
-                  <>
-                    <FolderDown className="w-4 h-4" />
-                    <span>Download Shots & Blueprint (ZIP)</span>
-                  </>
-                )}
-              </button>
-            )}
-
             <button
               type="button"
               onClick={onClose}
@@ -398,30 +373,9 @@ export default function MasterStudioModal({
                     <span>All Real Website Screenshots ({allScreenshots.length} Captures)</span>
                   </div>
                   <p className="text-[11px] text-emerald-200/90">
-                    These screenshots are captured directly by the autonomous browser engine. Click any screenshot to download, or download everything bundled in a single ZIP.
+                    These screenshots are captured directly by the autonomous browser engine. Click any screenshot to download it — the full campaign ZIP bundles every capture too.
                   </p>
                 </div>
-
-                {onDownloadScreenshotsZip && (
-                  <button
-                    type="button"
-                    disabled={isDownloadingScreenshotsZip}
-                    onClick={onDownloadScreenshotsZip}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition cursor-pointer shrink-0 disabled:opacity-60"
-                  >
-                    {isDownloadingScreenshotsZip ? (
-                      <>
-                        <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Zipping All Shots...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        <span>Download All Shots (.ZIP)</span>
-                      </>
-                    )}
-                  </button>
-                )}
               </div>
 
               {/* Screenshots Grid */}

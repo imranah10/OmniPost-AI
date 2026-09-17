@@ -930,31 +930,46 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
     const tool = tools[i % tools.length];
     const studio = tool.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
 
-    const hook = isAgency
-      ? (isVideo
-          ? `How top enterprises scale engineering with ${tool.name}`
-          : `Eliminate bottlenecks: ${tool.name} in ${studio}`)
-      : (isVideo
-          ? `Why everyone is talking about ${tool.name} in ${studio}`
-          : `Transform your workflow with ${tool.name} on ${strategy.brandName}`);
+    // CONTENT DIVERSITY ENGINE — every post gets a DIFFERENT hook formula,
+    // caption skeleton and CTA shape (rotated), built from the tool's own
+    // description so no two posts read like twins.
+    const tDesc = (tool.description || `Everything ${tool.name} can do for you`).replace(/\s+/g, ' ').trim();
+    const benefit = tDesc.length > 24 ? tDesc.charAt(0).toLowerCase() + tDesc.slice(1) : `Get ${tool.name} done in seconds, right in your browser`;
+    const brand = strategy.brandName;
+    const dom = websiteData.domain;
+    const hookStyles = [
+      () => `${tool.name}: the ${studio} shortcut nobody told you about`,
+      () => `Stop losing hours — ${tool.name} on ${brand} does it in seconds`,
+      () => `What can ${tool.name} actually do? More than you think 👀`,
+      () => `The ${studio} workflow you'll wish you found sooner: ${tool.name}`,
+      () => `${benefit.charAt(0).toUpperCase() + benefit.slice(1)} — no signup, no uploads, zero waiting`,
+      () => `POV: you just discovered ${tool.name} inside ${brand}`,
+      () => `Why are teams quietly switching to ${tool.name}?`,
+      () => `${tool.name} in ${studio} — try it once and you'll keep coming back`,
+      () => `Everything you wanted from a ${studio} tool, minus the bloat: ${tool.name}`,
+      () => `Your data never leaves your browser with ${tool.name} — here's why that matters`,
+      () => `From zero to done: ${tool.name} in under a minute`,
+      () => `The underrated ${studio} pick on ${brand}: ${tool.name}`,
+    ];
+    const hook = hookStyles[i % hookStyles.length]();
 
-    const caption = isAgency
-      ? `Looking to scale your capacity without the overhead?\n\nMeet ${tool.name} under ${studio} from ${strategy.brandName}.\n\n` +
-        `✅ Proven expertise with real track records\n` +
-        `✅ Enterprise governance & reliability\n` +
-        `✅ Dedicated support with seamless delivery\n\n` +
-        `${customPrompt ? `🎯 Focus: ${customPrompt}\n\n` : ''}` +
-        `${carouselPrompt && isCarousel ? `🎠 Carousel focus: ${carouselPrompt}\n\n` : ''}` +
-        `👇 Ready to build? Learn more at ${websiteData.domain}`
-      : `Ready to upgrade your workflow?\n\nDiscover ${tool.name} inside ${studio} on ${strategy.brandName}.\n\n` +
-        `⚡ ${tool.description || 'Fast, reliable, and modern'}\n` +
-        `🔒 Built for reliability and seamless performance\n` +
-        `✨ Instant access without unnecessary friction\n\n` +
-        `${customPrompt ? `🎯 Focus: ${customPrompt}\n\n` : ''}` +
-        `${carouselPrompt && isCarousel ? `🎠 Carousel focus: ${carouselPrompt}\n\n` : ''}` +
-        `👇 Try it now at ${websiteData.domain}`;
+    const capSkeletons = [
+      () => `${hook}\n\n${benefit}.\n\n✅ Works instantly in your browser\n✅ No installs, no learning curve\n✅ Part of ${brand}'s ${studio} suite${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\n👉 Open ${tool.name} at ${dom}`,
+      () => `Quick one: ${tool.name}.\n\nMost ${studio} tools make you wait, sign up, or upload your files. ${brand} does the opposite — ${benefit}.\n\n• Fast: results in seconds\n• Private: runs on your device\n• Free: no paywall surprises${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\nSee it live → ${dom}`,
+      () => `We built ${tool.name} for one reason: ${benefit.replace(/^[A-Z]/, (c) => c.toLowerCase())} without the usual friction.\n\nIt lives in ${studio} on ${brand}, it's free, and it takes about 60 seconds to get value out of it.${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\nTry it now: ${dom}`,
+      () => `3 reasons ${tool.name} earns its spot in your bookmarks:\n\n1️⃣ ${benefit.charAt(0).toUpperCase() + benefit.slice(1)}\n2️⃣ Zero data leaves your browser\n3️⃣ It's part of the full ${studio} suite on ${brand}${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\nTest it yourself → ${dom}`,
+      () => `Unpopular opinion: ${studio} tools don't need accounts, uploads or subscriptions.\n\n${tool.name} on ${brand} proves it — ${benefit}.\n\nBookmark it, thank yourself later.${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\n${dom}`,
+    ];
+    const caption = capSkeletons[Math.floor(i / hookStyles.length) % capSkeletons.length]();
 
-    const cta = `Explore ${tool.name} 👉 ${websiteData.domain}`;
+    const ctaVariants = [
+      `Explore ${tool.name} 👉 ${dom}`,
+      `Try ${tool.name} free → ${dom}`,
+      `Open the ${studio} suite: ${dom}`,
+      `${tool.name} is one click away: ${dom}`,
+      `See it in action 👉 ${dom}`,
+    ];
+    const cta = ctaVariants[i % ctaVariants.length];
 
     const brandClean = strategy.brandName.replace(/[^a-zA-Z0-9]/g, '');
     const toolClean = tool.name.replace(/[^a-zA-Z0-9]/g, '');
@@ -1034,7 +1049,7 @@ export async function generateFullCampaign({
   const dayOf = (i) => Math.min(days, Math.floor((i * days) / totalPosts) + 1);
 
   const studiosList = (websiteData.studios || []).join(', ') || 'Platform Offerings';
-  const toolsList = (websiteData.discoveredTools || []).slice(0, 24).map((t) => `"${t.name}" (${t.studio})`).join(', ');
+  const toolsList = (websiteData.discoveredTools || []).slice(0, 40).map((t) => `"${t.name}" (${t.studio})${t.description ? ` — ${t.description.slice(0, 60)}` : ''}`).join('; ');
 
   let campaignFallbackReason = '';
   if (userApiKey) {
@@ -1058,6 +1073,7 @@ CRITICAL COPYWRITING INSTRUCTIONS:
 - ONLY assign each post to one of these platforms: ${platforms.join(', ')}.
 - Write STRICTLY in the authentic voice of ${strategy.brandName} (${strategy.industry}).
 - Every post MUST spotlight a specific Section and a specific Capability from the list above.
+- ANTI-REPEAT RULE: every post must feature a DIFFERENT capability — never reuse the same tool for two posts while unfeatured tools remain. Hooks must each use a DIFFERENT angle (question, stat, pain-point, contrarian, listicle, how-to, myth-bust, social-proof, curiosity, direct benefit). Two posts must never share a sentence pattern.
 - Captions: first line = scroll-stopping hook naming the capability + outcome; body 3-5 punchy lines; CTA invites to ${websiteData.domain}.
 - Hashtags: 8-10 relevant, customized for ${strategy.brandName}.
 - imagePrompt: a vivid commercial advertising prompt for THIS post — it MUST be a UNIQUE visual concept unlike every other post in the campaign. Rotate compositions across posts: hero product shot, real-life scene, 3D device mockup, macro detail, flat-lay desk, typographic poster, testimonial moment, data visualization, cinematic workspace, neon CTA poster. No two posts may share the same setting, lighting or framing.

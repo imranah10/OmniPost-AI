@@ -40,19 +40,10 @@ export default function App() {
   const [engineMode, setEngineMode] = useState('auto'); // 'server' | 'standalone'
   const [liveStep, setLiveStep] = useState(null);
   const [genProgress, setGenProgress] = useState(null);
-  // OMNIPILOT — full autonomy: auto-accept the plan and auto-generate after
-  // analysis. STRICTLY OPT-IN: default OFF, so generation always waits for the
-  // user's own click on "Accept AI Plan & Generate All" unless they explicitly
-  // flip this engine on in the URL-input screen.
-  const [pilotMode, setPilotMode] = useState(() => {
-    try {
-      return localStorage.getItem('omnipost_omnipilot') === 'on';
-    } catch { return false; }
-  });
-  const togglePilot = (on) => {
-    setPilotMode(on);
-    try { localStorage.setItem('omnipost_omnipilot', on ? 'on' : 'off'); } catch {}
-  };
+  // NO AUTOPILOT ANYWHERE: analysis starts on the user's click, the strategy
+  // page waits, and generation starts only on "Accept AI Plan & Generate All".
+  // No media is generated in the background — posts ship prompts; media lives
+  // in the user's hands (and the ZIP).
 
   const handleSaveKeys = (newKeys) => {
     setKeys(newKeys);
@@ -171,25 +162,9 @@ export default function App() {
         setMasterImagePrompt(result.masterImagePrompt || '');
         setMasterVideoPrompt(result.masterVideoPrompt || '');
         setMasterBlueprint(result.masterBlueprint || '');
-        // Show the dashboard NOW (copy is ready); AI images fill in background
+        // Dashboard shows copy-only immediately. NO automatic media generation —
+        // the user makes visuals from the per-post prompts (or the ZIP workflow).
         setStep('campaign');
-        result.fillImages(({ index, post }) => {
-          setPosts((prev) =>
-            prev.map((p) =>
-              p.id === post?.id
-                ? {
-                    ...p,
-                    generatedImageUrl: post.generatedImageUrl,
-                    rawAiUrl: post.rawAiUrl,
-                    rawBlob: post.rawBlob,
-                    cardDataUrl: post.cardDataUrl,
-                    remoteAiUrl: post.remoteAiUrl,
-                  }
-                : p
-            )
-          );
-          setGenProgress({ done: index, total: result.posts.length, filling: true });
-        });
         return;
       }
       setStep('campaign');
@@ -256,8 +231,6 @@ export default function App() {
           <UrlInputSection
             onStartAnalysis={handleStartAnalysis}
             isLoading={false}
-            pilotMode={pilotMode}
-            onTogglePilot={togglePilot}
           />
         )}
 
@@ -275,7 +248,6 @@ export default function App() {
             strategy={strategy}
             onConfirmGeneration={handleConfirmGeneration}
             isGeneratingCampaign={isGeneratingCampaign}
-            pilotMode={pilotMode}
           />
         )}
 

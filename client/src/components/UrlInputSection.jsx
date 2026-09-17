@@ -11,7 +11,7 @@ import {
   Layers
 } from 'lucide-react';
 
-export default function UrlInputSection({ onStartAnalysis, isLoading, pilotMode = false, onTogglePilot = () => {} }) {
+export default function UrlInputSection({ onStartAnalysis, isLoading }) {
   const [url, setUrl] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
   const [carouselPrompt, setCarouselPrompt] = useState('');
@@ -123,41 +123,6 @@ export default function UrlInputSection({ onStartAnalysis, isLoading, pilotMode 
                 </>
               )}
             </button>
-          </div>
-
-          {/* OMNIPILOT — full autonomy engine toggle */}
-          <div
-            role="switch"
-            aria-checked={pilotMode}
-            onClick={() => onTogglePilot(!pilotMode)}
-            className={`flex items-center justify-between gap-3 p-3.5 rounded-2xl border cursor-pointer transition-all ${
-              pilotMode
-                ? 'bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-pink-950/40 border-indigo-500/50 shadow-lg shadow-indigo-500/10'
-                : 'bg-slate-900/40 border-slate-800/80'
-            }`}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <span className={`text-xl ${pilotMode ? 'animate-pulse' : ''}`}>🛩️</span>
-              <div className="min-w-0">
-                <div className={`text-xs font-bold ${pilotMode ? 'text-white' : 'text-slate-400'}`}>
-                  OMNIPILOT™ — Full Autonomy Engine
-                </div>
-                <div className={`text-[10px] text-slate-400 leading-snug`}>
-                  {pilotMode
-                    ? 'Full auto: the moment analysis finishes, the plan launches itself in seconds — zero clicks.'
-                    : 'You stay in control: after analysis, review the plan and press Generate. Everything still runs end to end.'}
-                </div>
-              </div>
-            </div>
-            <span
-              className={`shrink-0 w-11 h-6 rounded-full relative transition ${pilotMode ? 'bg-indigo-500' : 'bg-slate-700'}`}
-            >
-              <span
-                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
-                  pilotMode ? 'left-[22px]' : 'left-0.5'
-                }`}
-              />
-            </span>
           </div>
 
           {/* Social Media Platform Selector */}

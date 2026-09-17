@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Sparkles, 
   Calendar, 
@@ -23,27 +23,15 @@ export default function StrategyRecommendation({
   websiteData, 
   strategy, 
   onConfirmGeneration, 
-  isGeneratingCampaign,
-  pilotMode = false
+  isGeneratingCampaign
 }) {
   const [days, setDays] = useState(strategy.recommendedDays || 14);
   const [totalPosts, setTotalPosts] = useState(strategy.recommendedPostCount || 10);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [selectedStudioTab, setSelectedStudioTab] = useState('all');
-  // OMNIPILOT AUTOPILOT — show the plan briefly, then generate without any click.
-  // The user can still cancel and customize (the countdown stops instantly).
-  const [autoIn, setAutoIn] = useState(pilotMode ? 6 : null);
-
-  useEffect(() => {
-    if (autoIn == null || isGeneratingCampaign) return undefined;
-    if (autoIn <= 0) {
-      handleQuickAccept();
-      return undefined;
-    }
-    const t = setTimeout(() => setAutoIn((v) => (v == null ? null : v - 1)), 1000);
-    return () => clearTimeout(t);
-  }, [autoIn, isGeneratingCampaign]);
+  // NO AUTOPILOT. Generation starts ONLY when the user clicks
+  // "Accept AI Plan & Generate All" (or the custom-generate button).
 
   const videoCount = strategy.recommendedBreakdown?.videoReels || Math.floor(totalPosts * 0.4);
   const imageCount = strategy.recommendedBreakdown?.imagePosts || (totalPosts - videoCount);
@@ -112,28 +100,6 @@ export default function StrategyRecommendation({
                   ? `⚠ Gemini unavailable even after auto-retries: ${strategy.geminiError} — the ready-to-use plan below was written by the built-in Smart Engine.`
                   : 'Tip: add a free Gemini API key in Settings (⚙️) — strategy & captions will be written by Google Gemini instead of the built-in Smart Engine.'}
               </p>
-            )}
-
-            {/* OMNIPILOT AUTOPILOT banner + countdown */}
-            {autoIn != null && (
-              <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-pink-950/40 border border-indigo-500/50">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-xl animate-pulse">🛩️</span>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white">OMNIPILOT™ ENGAGED</div>
-                    <div className="text-[10px] text-indigo-200/80">
-                      Full campaign auto-generates in {autoIn}s — posts, posters, carousels & reels, zero clicks.
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAutoIn(null)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-[11px] font-semibold text-slate-200 transition cursor-pointer shrink-0"
-                >
-                  Customize instead
-                </button>
-              </div>
             )}
 
             <h2 className="font-heading text-2xl sm:text-3xl font-extrabold text-white">

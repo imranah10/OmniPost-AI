@@ -152,6 +152,90 @@ function mdFromMeta(meta, url) {
 
 const isHtmlPayload = (text) => Boolean(text) && text.trimStart().startsWith('<');
 
+/**
+ * SITEMAP DISCOVERY — read /sitemap.xml (and common variants) for the FULL page
+ * list. Fixes "adha adhura" crawling: sites like multi-tool platforms list
+ * every studio/tool page there, far beyond what nav-links alone reveal.
+ * Returns ranked URLs: tool/studio/product pages first, blog last.
+ */
+async function discoverSitemapUrls(origin) {
+  const candidates = [
+    `${origin}/sitemap.xml`,
+    `${origin}/sitemap_index.xml`,
+    `${origin}/sitemap-index.xml`,
+    `${origin}/wp-sitemap.xml`,
+  ];
+  const found = new Set();
+  for (const smUrl of candidates) {
+    try {
+      const xml = await Promise.race([
+        proxyText(smUrl, { timeout: 9000 }),
+        new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+      ]);
+      if (!xml || !/<(urlset|sitemapindex)/i.test(xml)) continue;
+      const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+      // sitemap index → descend one level into child sitemaps (max 5)
+      if (/sitemapindex/i.test(xml)) {
+        const children = locs.filter((l) => l.startsWith(origin)).slice(0, 5);
+        for (const child of children) {
+          try {
+            const childXml = await Promise.race([
+              proxyText(child, { timeout: 9000 }),
+              new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+            ]);
+            if (!childXml) continue;
+            [...childXml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].forEach((m) => {
+              if (m[1].startsWith(origin)) found.add(m[1]);
+            });
+          } catch { /* keep going */ }
+        }
+      } else {
+        locs.forEach((l) => {
+          if (l.startsWith(origin)) found.add(l);
+        });
+      }
+      if (found.size) break;
+    } catch { /* try next variant */ }
+  }
+  const urls = [...found];
+  const rank = (u) => {
+    const path = u.replace(/^https?:\/\/[^/]+/, '').toLowerCase();
+    if (path === '/' || path === '') return 0;
+    if (/(studio|tool|product|app|feature|category|suite)s?\//.test(path)) return 1;
+    if (/blog|news|article|post\//.test(path)) return 3;
+    return 2;
+  };
+  return urls.sort((a, b) => rank(a) - rank(b));
+}
+
+/** Crawl a list of URLs in gentle batches, each URL bounded by a HARD
+ *  deadline (Promise.race) so one dead proxy chain can never stall the whole
+ *  deep-crawl. Stragglers are dropped silently. */
+async function crawlBatched(urls, { batchSize = 9, gapMs = 300, perUrlDeadlineMs = 15000, onBatch = () => {} } = {}) {
+  const grab = async (l) => {
+    const timer = new Promise((resolve) => setTimeout(() => resolve(null), perUrlDeadlineMs));
+    const work = (async () => {
+      try {
+        const html = await proxyText(l, { timeout: 9000 });
+        if (!html) return null;
+        const p = isHtmlPayload(html) ? parseHtml(html, l) : parseMarkdownPage(html, l);
+        p.url = l;
+        return p;
+      } catch { return null; }
+    })();
+    return Promise.race([work, timer]);
+  };
+  const pages = [];
+  for (let i = 0; i < urls.length; i += batchSize) {
+    const batch = urls.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map(grab));
+    results.filter(Boolean).forEach((p) => pages.push(p));
+    onBatch({ done: Math.min(i + batchSize, urls.length), total: urls.length, found: pages.length });
+    if (i + batchSize < urls.length) await new Promise((r) => setTimeout(r, gapMs));
+  }
+  return pages;
+}
+
 function deriveStructure(pages, domain) {
   const studios = [];
   const toolsMap = new Map();
@@ -171,12 +255,30 @@ function deriveStructure(pages, domain) {
     for (const nav of p.navTexts) {
       if (nav.split(' ').length <= 4 && !studios.includes(nav)) studios.push(nav);
     }
-    // h2/h3 headings on each page look like tool/capability names
-    for (const h of p.h2s) {
+    // h1/h2/h3 headings on each page look like tool/capability names
+    for (const h of [...(p.h1s || []), ...p.h2s]) {
       const words = h.split(' ');
       if (words.length > 9) continue; // long marketing sentences → skip
       pushTool(h, p.title.split(/[|\-–—:]/)[0].trim().slice(0, 30) || 'Platform', h, p.url);
     }
+    // The page's own URL slug is a strong tool signal for deep-crawled pages
+    // (sitemap-driven): /studios/pdf-studio/pdf-merge → "Pdf Merge"
+    try {
+      const path = new URL(p.url).pathname;
+      const segs = path.split('/').filter(Boolean);
+      if (segs.length >= 2 && /^\/(tool|tools|studio|studios|category|app|apps|feature|features|product|products|suite|suites)/i.test(path)) {
+        const slugName = segs[segs.length - 1]
+          .replace(/\.(html?|php)$/i, '')
+          .replace(/[-_]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+          .trim();
+        const studioGuess = segs[0].replace(/s$/i, '').replace(/\b\w/, (c) => c.toUpperCase());
+        if (slugName && slugName.split(' ').length <= 7) {
+          pushTool(slugName, studioGuess, p.description || `${slugName} on ${domain}`, p.url);
+          if (!studios.includes(studioGuess)) studios.push(studioGuess);
+        }
+      }
+    } catch { /* malformed URL — skip */ }
     // Tool-like links (/tool/x, /studio/y, /category/z) are gold
     for (const l of p.internal) {
       const path = new URL(l.href).pathname;
@@ -196,11 +298,11 @@ function deriveStructure(pages, domain) {
     );
   }
 
-  const discoveredTools = [...toolsMap.values()].slice(0, 40);
+  const discoveredTools = [...toolsMap.values()].slice(0, 100);
   const isStudioPlatform = discoveredTools.length >= 12 || studios.length >= 6;
 
   return {
-    studios: studios.slice(0, 12),
+    studios: studios.slice(0, 16),
     discoveredTools,
     isStudioPlatform,
     sectionTypeLabel: isStudioPlatform ? 'Studios' : 'Sections & Services',
@@ -221,7 +323,7 @@ function healthReport(pages, hasHttps) {
   return { score: Math.min(100, score), label: score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : 'Needs Work' };
 }
 
-export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 13 } = {}) {
+export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 34 } = {}) {
   const url = normalizeUrl(targetUrl);
   if (!url) throw new Error('Invalid URL');
   const uObj = new URL(url);
@@ -258,39 +360,51 @@ export async function analyzeSite(targetUrl, { onStep = () => {}, maxPages = 13 
   const home = isHtmlPayload(homeHtml) ? parseHtml(homeHtml, url) : parseMarkdownPage(homeHtml, url);
   home.url = url;
 
-  // Round 2: crawl up to maxPages-1 interesting internal pages in parallel
-  const interesting = home.internal
-    .filter((l) => l.href !== url && !/\.(pdf|jpg|png|zip|xml)$/i.test(l.href))
-    .slice(0, maxPages - 1);
+  // FULL-SITE discovery: sitemap first (every tool/studio page listed), then
+  // nav links as fallback — dedup, drop assets, rank tool-pages first.
+  onStep({ key: 'sitemap', label: 'Discovering every page via sitemap…', progress: 32 });
+  const sitemapUrls = await discoverSitemapUrls(origin);
+  const seenHrefs = new Set([url]);
+  const linkBased = home.internal
+    .map((l) => l.href)
+    .filter((href) => !/\.(pdf|jpg|png|zip|xml)$/i.test(href));
+  const crawlTargets = [];
+  for (const href of [...sitemapUrls, ...linkBased]) {
+    if (seenHrefs.has(href)) continue;
+    seenHrefs.add(href);
+    crawlTargets.push(href);
+    if (crawlTargets.length >= maxPages - 1) break;
+  }
   const pages = [home];
-  if (interesting.length) {
-    onStep({ key: 'deep', label: `Deep-testing ${interesting.length + 1} pages…`, progress: 40 });
-    const more = await Promise.all(
-      interesting.map(async (l) => {
-        const html = await proxyText(l.href, { timeout: 12000 });
-        if (!html) return null;
-        const p = isHtmlPayload(html) ? parseHtml(html, l.href) : parseMarkdownPage(html, l.href);
-        p.url = l.href;
-        return p;
-      })
-    );
-    pages.push(...more.filter(Boolean));
+  if (crawlTargets.length) {
+    const more = await crawlBatched(crawlTargets, {
+      onBatch: ({ done, total, found }) => {
+        onStep({ key: 'deep', label: `Deep-reading every page… ${done}/${total} (${found} parsed)`, progress: 40 + Math.round((done / total) * 15) });
+      },
+    });
+    pages.push(...more);
   }
 
-  onStep({ key: 'structure', label: 'Mapping studios, tools & capabilities…', progress: 55 });
+  onStep({ key: 'structure', label: 'Mapping studios, tools & capabilities…', progress: 58 });
   const structure = deriveStructure(pages, domain);
 
-  onStep({ key: 'screenshots', label: `OmniPilot: capturing ALL ${interesting.length + 1} pages…`, progress: 68 });
-  // OMNIPILOT total capture — every crawled page gets a live screenshot, not just
-  // the first four. The homepage capture is awaited (needed for the brand
-  // palette); every other page is warmed upstream in a gentle stagger so
-  // mShots has time to generate before posts/ZIP fetch them.
+  const shotCap = 24;
+  onStep({ key: 'screenshots', label: `Capturing live snapshots of up to ${shotCap} key pages…`, progress: 68 });
+  // Deep capture — homepage + as many crawled pages as the free screenshot
+  // service can comfortably warm (staggered, fire-and-forget; the ZIP fetches
+  // them later). Only the homepage capture is awaited (needed for the palette).
+  const nameFor = (href) => {
+    const known = home.internal.find((l) => l.href === href);
+    if (known?.name) return known.name.slice(0, 60);
+    const seg = href.replace(/\/$/, '').split('/').filter(Boolean).pop() || 'Page';
+    return seg.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
+  };
   const shotTargets = [
     { url, title: home.title || 'Landing Page', description: home.description || 'Hero & full platform view' },
-    ...interesting.map((l) => ({
-      url: l.href,
-      title: l.name,
-      description: `Live capture of ${l.href.replace(origin, '') || '/'} `,
+    ...crawlTargets.slice(0, shotCap - 1).map((href) => ({
+      url: href,
+      title: nameFor(href),
+      description: `Live capture of ${href.replace(origin, '') || '/'} `,
     })),
   ];
   const screenshots = [];
