@@ -33,6 +33,16 @@ const STOP_LINKS = /login|signin|signup|register|privacy|terms|cookie|blog\/(20|
 // be a real ISO-639 language code and the whole path must stay short — real
 // tool slugs ("ocr-pdf", "word-to-pdf") are longer than any locale path.
 const LANG_CODES = new Set('af,sq,am,ar,hy,az,eu,be,bn,bs,bg,ca,zh,hr,cs,da,nl,en,et,fi,fr,gl,ka,de,el,gu,ha,he,hi,hu,is,id,it,ja,kn,kk,km,ko,ku,ky,lo,lv,lt,mk,ms,ml,mt,mi,mr,mn,ne,no,or,ps,fa,pl,pt,pa,ro,ru,sr,si,sk,sl,so,es,sw,sv,ta,te,th,tr,tk,uk,ur,uz,vi,cy,xh,yi,yo,zu'.split(','));
+
+// Language-switcher anchor texts ("Français", "Deutsch", "日本語" …). Sites put
+// these in the header/footer of EVERY page; when the homepage-sections pass
+// scans internal links they must never become fake "tools".
+const LANGUAGE_NAME_ANCHORS = new Set(
+  `english,french,français,francais,deutsch,german,spanish,español,espanol,português,portugues,portuguese,italiano,italian,nederlands,dutch,polski,polish,türkçe,turkce,turkish,русский,russian,日本語,中文,简体中文,繁體中文,한국어,korean,arabic,العربية,हिन्दी,हिंदी,hindi,bahasa indonesia,indonesian,tiếng việt,svenska,dansk,norsk,suomi,čeština,română,magyar,ελληνικά,ukrainian,українська,hebrew,עברית,thai,ไทย,vietnamese,català,euskara,galego,latviešu,lietuvių,slovenčina,slovenščina,български,српски,hrvatski`
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+);
 function isLocalePath(p) {
   const s = String(p || '');
   const m = s.match(/^\/([a-z]{2,3})(?:[-_]([a-z0-9]{2,4}))?\/?$/i);
@@ -586,6 +596,10 @@ function deriveStructure(pages, domain) {
         if (u.origin !== new URL(homeUrl).origin) continue; // internal links only
         const path = u.pathname.replace(/\/+$/, '') || '/';
         if (path === '/' || JUNK_SECTION_PATH.test(path)) continue;
+        // Language-switcher links (/fr, /de, /zh-cn …) are locale homes, NOT
+        // product sections — the iloveimg run leaked "Français" in as a tool.
+        if (isLocalePath(path)) continue;
+        if (LANGUAGE_NAME_ANCHORS.has(String(l.name || '').trim().toLowerCase())) continue;
         if (/\.(pdf|jpg|png|zip|xml|svg|webp)$/i.test(path)) continue;
         const seg = path.split('/')[1];
         if (!seg || seenSections.has(seg)) continue;

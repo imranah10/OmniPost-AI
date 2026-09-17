@@ -13,7 +13,8 @@ import {
   Info,
   Download,
   ShieldCheck,
-  Monitor
+  Monitor,
+  MapPin
 } from 'lucide-react';
 import { getUnifiedScreenshots } from './CampaignDashboard.jsx';
 import SmartShotImg from './SmartShotImg.jsx';
@@ -25,12 +26,14 @@ export default function MasterStudioModal({
   onClose,
   strategy,
   websiteData,
+  posts = [],
   masterBrandPrompt,
   masterImagePrompt,
   masterVideoPrompt,
-  masterBlueprint
+  masterBlueprint,
+  postingGuide
 }) {
-  const [activeTab, setActiveTab] = useState('blueprint'); // 'blueprint' | 'image' | 'video' | 'screenshots' | 'brief'
+  const [activeTab, setActiveTab] = useState('blueprint'); // 'blueprint' | 'image' | 'video' | 'screenshots' | 'posting' | 'brief'
   const [copiedType, setCopiedType] = useState(null);
 
   if (!isOpen) return null;
@@ -162,6 +165,19 @@ export default function MasterStudioModal({
           >
             <Monitor className="w-4 h-4" />
             <span>📸 All Captured Screenshots ({allScreenshots.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('posting')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+              activeTab === 'posting'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <MapPin className="w-4 h-4" />
+            <span>📍 Where To Post</span>
           </button>
 
           <button
@@ -383,7 +399,16 @@ export default function MasterStudioModal({
                 </div>
               </div>
 
-              {/* Screenshots Grid */}
+              {/* Screenshots Grid (with honest empty state) */}
+              {allScreenshots.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-slate-900/60 border border-dashed border-slate-700 text-center space-y-2">
+                  <Camera className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-sm font-bold text-slate-300">No screenshots captured yet</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Captures appear here after an Auto-Pilot analysis of a website URL. Run a new analysis (or re-export the ZIP) and this gallery fills with every page the engine visited.
+                  </p>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[460px] overflow-y-auto p-1 scrollbar-thin">
                 {allScreenshots.map((shot, sIdx) => (
                   <div
@@ -427,6 +452,62 @@ export default function MasterStudioModal({
                     </div>
                   </div>
                 ))}
+              </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4b: WHERE TO POST — platform publishing playbook */}
+          {activeTab === 'posting' && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div className="p-4 rounded-2xl bg-rose-950/20 border border-rose-500/30 text-rose-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-xs text-rose-300">
+                  <MapPin className="w-4 h-4 text-rose-400" />
+                  <span>Where & How To Publish — {strategy?.brandName || 'Brand'} ({posts.length} posts):</span>
+                </div>
+                <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                  The platforms you selected, the posts assigned to each, the exact in-app posting steps, caption limits (X = 280!), link rules, and ready-to-paste short captions. The same playbook ships inside the ZIP as <strong className="text-rose-200">PLATFORM_POSTING_GUIDE.md</strong>.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300">
+                    PLATFORM_POSTING_GUIDE.md Preview:
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(postingGuide, 'posting')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition cursor-pointer shadow-md shadow-rose-600/20"
+                    >
+                      {copiedType === 'posting' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Guide Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Posting Guide</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTextFile('PLATFORM_POSTING_GUIDE.md', postingGuide)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download (.MD)</span>
+                    </button>
+                  </div>
+                </div>
+
+                <pre className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto scrollbar-thin selection:bg-rose-600 selection:text-white">
+                  {postingGuide}
+                </pre>
               </div>
             </div>
           )}
@@ -481,7 +562,7 @@ export default function MasterStudioModal({
         <div className="p-4 px-6 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span>The <strong className="text-slate-300">/all_website_screenshots/</strong> folder and <strong className="text-slate-300">MASTER_BRAND_BLUEPRINT.md</strong> are always included inside the exported ZIP bundle.</span>
+            <span>The <strong className="text-slate-300">/all_website_screenshots/</strong> folder, <strong className="text-slate-300">PLATFORM_POSTING_GUIDE.md</strong> and <strong className="text-slate-300">MASTER_BRAND_BLUEPRINT.md</strong> are always included inside the exported ZIP bundle.</span>
           </div>
 
           <div className="flex items-center gap-2">

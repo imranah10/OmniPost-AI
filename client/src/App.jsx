@@ -268,6 +268,7 @@ export default function App() {
             masterImagePrompt={masterImagePrompt}
             masterVideoPrompt={masterVideoPrompt}
             masterBlueprint={masterBlueprint}
+            selectedPlatforms={selectedPlatforms}
             higgsfieldApiKey={keys.higgsfieldApiKey}
             geminiApiKey={keys.geminiApiKey}
             onRegenerate={handleRegenerate}
