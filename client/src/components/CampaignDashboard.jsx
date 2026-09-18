@@ -154,6 +154,7 @@ export default function CampaignDashboard({
   const [copiedPromptKey, setCopiedPromptKey] = useState(null);
   const [expandedPromptPostId, setExpandedPromptPostId] = useState(null);
   const [isExportingZip, setIsExportingZip] = useState(false);
+  const [zipStatus, setZipStatus] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'calendar'
   const [langPack, setLangPack] = useState(null);
   const [langState, setLangState] = useState('idle'); // 'idle' | 'loading' | 'ready' | 'error'
@@ -402,19 +403,63 @@ ${screenshots.map((s) => `- **${s.fileName}**: ${s.title} (${s.description})`).j
       };
 
       // Placeholder-proof screenshot fetch for the ZIP: if the fetched bytes
-      // are still mShots' 400x300 "generating" placeholder (black card), re-
-      // fetch once with a fresh cache buster (upstream may have finished by
-      // now). STILL a placeholder → null → the file is SKIPPED entirely, so
-      // no day folder / screenshot folder ever contains a blank image.
-      const fetchRealShotBlob = async (url) => {
+      // are still mShots' 400x300 "generating" placeholder (black card), KEEP
+      // POLLING with fresh cache-busters — a first-generation capture usually
+      // completes within ~30s, and the user's complaint was literally "ZIP ke
+      // andar screenshot nahi hai" (export happened while captures were still
+      // generating → old code skipped them silently). STILL a placeholder
+      // after the budget → null → the file is SKIPPED entirely, so no day
+      // folder / screenshot folder ever contains a blank image.
+      const SHOT_POLL_TRIES = 5;
+      const SHOT_POLL_GAP_MS = 6000;
+      const fetchRealShotBlobUncached = async (url) => {
+        if (!url) return null;
         let blob = await getBlobCached(url);
-        if (blob && (await isPlaceholderBlob(blob, 1280))) {
+        for (let i = 0; i < SHOT_POLL_TRIES; i++) {
+          if (!blob || !(await isPlaceholderBlob(blob, 1280))) return blob || null;
+          await new Promise((r) => setTimeout(r, SHOT_POLL_GAP_MS));
           const sep = url.includes('?') ? '&' : '?';
-          blob = await getBlobCached(`${url}${sep}zipcb=${Date.now()}`);
-          if (blob && (await isPlaceholderBlob(blob, 1280))) return null;
+          blob = await getBlobCached(`${url}${sep}zipcb=${Date.now()}-p${i}`);
         }
-        return blob || null;
+        return blob && !(await isPlaceholderBlob(blob, 1280)) ? blob : null;
       };
+
+      // One polling promise per UNIQUE URL — posts repeat the same tools
+      // across days, so ~84 posts share ~30 captures; each URL is polled
+      // exactly once and every caller awaits the shared result.
+      const shotPollCache = new Map();
+      const fetchRealShotBlob = (url) => {
+        if (!url) return Promise.resolve(null);
+        if (!shotPollCache.has(url)) shotPollCache.set(url, fetchRealShotBlobUncached(url));
+        return shotPollCache.get(url);
+      };
+
+      // PRE-FETCH every screenshot the ZIP will need — in PARALLEL — before
+      // any folder is written. This is what guarantees the ZIP actually
+      // contains the images even when captures were still "generating".
+      const neededUrls = new Set();
+      if (websiteData.screenshotUrl) neededUrls.add(websiteData.screenshotUrl);
+      getUnifiedScreenshots(websiteData).forEach((s) => s.webUrl && neededUrls.add(s.webUrl));
+      posts.forEach((p) => {
+        const m = shotForTool(websiteData, { toolName: p.toolName, studio: p.studio, toolUrl: p.toolUrl });
+        [p.inputScreenshotUrl, p.outputScreenshotUrl, p.screenshotUrl, m?.webUrl]
+          .forEach((u) => u && neededUrls.add(u));
+      });
+      const neededList = [...neededUrls];
+      let shotsDone = 0;
+      await Promise.allSettled(
+        neededList.map((u) =>
+          fetchRealShotBlob(u).then((b) => {
+            shotsDone += 1;
+            setZipStatus(
+              b
+                ? `Fetching screenshots ${shotsDone}/${neededList.length}…`
+                : `Screenshots ${shotsDone}/${neededList.length}… (waiting for captures)`
+            );
+          })
+        )
+      );
+      setZipStatus('Building ZIP folders…');
 
       // 0. Root: START_HERE.txt — the ZIP's front door (reading order + daily loop)
       zip.file("START_HERE.txt", startHereTxt);
@@ -787,6 +832,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
       alert("Failed to create ZIP bundle. Individual downloads are still available.");
     } finally {
       setIsExportingZip(false);
+      setZipStatus('');
     }
   };
 
@@ -952,7 +998,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
             {isExportingZip ? (
               <>
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Packaging ZIP Bundle...</span>
+                <span>{zipStatus || 'Packaging ZIP Bundle...'}</span>
               </>
             ) : (
               <>
