@@ -31,8 +31,11 @@ export async function standaloneGenerateCampaign({
   geminiApiKey,
   onPostDone = () => {},
 }) {
-  const safePosts = Math.max(1, Math.min(30, parseInt(totalPosts) || 10));
   const safeDays = Math.max(1, Math.min(60, parseInt(days) || 14));
+  // totalPosts is DERIVED inside the engine (days x selected platforms) — the
+  // standalone cap only guards against absurd inputs, it must not break the
+  // day x platform coverage guarantee for larger campaigns.
+  const safePosts = Math.max(1, Math.min(400, parseInt(totalPosts) || 10));
 
   const result = await generateFullCampaign({
     websiteData,
@@ -43,6 +46,7 @@ export async function standaloneGenerateCampaign({
     carouselPrompt,
     selectedPlatforms,
     userApiKey: geminiApiKey,
+    onProgress: ({ index, total }) => onPostDone({ index, total }),
   });
 
   const posts = Array.isArray(result) ? result : (result.posts || []);

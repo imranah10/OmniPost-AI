@@ -29,10 +29,17 @@ export default function StrategyRecommendation({
   strategy, 
   onConfirmGeneration, 
   isGeneratingCampaign,
-  onBack
+  onBack,
+  selectedPlatforms = []
 }) {
+  // COVERAGE MODEL: total posts = days × selected platforms. Every day gets
+  // one post per selected platform — post karu ya na karu, content har din
+  // har platform ke liye ready milna chahiye.
+  const perDay = Math.max(1, (Array.isArray(selectedPlatforms) && selectedPlatforms.length) ? selectedPlatforms.length : 4);
   const [days, setDays] = useState(strategy.recommendedDays || 14);
-  const [totalPosts, setTotalPosts] = useState(strategy.recommendedPostCount || 10);
+  const derivedTotal = days * perDay;
+  const quickDays = strategy.recommendedDays || 14;
+  const quickTotal = quickDays * perDay;
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [selectedStudioTab, setSelectedStudioTab] = useState('all');
@@ -63,8 +70,8 @@ export default function StrategyRecommendation({
   // NO AUTOPILOT. Generation starts ONLY when the user clicks
   // "Accept AI Plan & Generate All" (or the custom-generate button).
 
-  const videoCount = strategy.recommendedBreakdown?.videoReels || Math.floor(totalPosts * 0.4);
-  const imageCount = strategy.recommendedBreakdown?.imagePosts || (totalPosts - videoCount);
+  const videoCount = Math.max(1, Math.round(derivedTotal * 0.35));
+  const imageCount = derivedTotal - videoCount;
 
   const handleDownloadScreenshot = (e, shot) => {
     e.stopPropagation();
@@ -78,15 +85,15 @@ export default function StrategyRecommendation({
 
   const handleQuickAccept = () => {
     onConfirmGeneration({
-      days: strategy.recommendedDays || 14,
-      totalPosts: strategy.recommendedPostCount || 10
+      days: quickDays,
+      totalPosts: quickTotal
     });
   };
 
   const handleCustomConfirm = () => {
     onConfirmGeneration({
       days,
-      totalPosts
+      totalPosts: derivedTotal
     });
   };
 
@@ -492,10 +499,10 @@ export default function StrategyRecommendation({
                 </div>
 
                 <h3 className="font-heading text-2xl sm:text-3xl font-extrabold text-white flex flex-wrap items-center gap-3">
-                  <span>{strategy.recommendedPostCount} High-Impact Posts</span>
+                  <span>{quickTotal} High-Impact Posts</span>
                   <span className="text-slate-500 font-light">over</span>
                   <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-400">
-                    {strategy.recommendedDays} Days
+                    {quickDays} Days
                   </span>
                 </h3>
 
@@ -503,18 +510,24 @@ export default function StrategyRecommendation({
                   {strategy.rationale}
                 </p>
 
+                {/* Coverage badge — every day × every platform */}
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-200">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                  {quickDays} days × {perDay} platforms = {quickTotal} posts — every day covers EVERY selected platform
+                </div>
+
                 {/* Media Distribution Badge */}
                 <div className="flex flex-wrap items-center gap-3 pt-1">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold bg-purple-500/15 border border-purple-500/30 text-purple-200">
                     <Video className="w-3.5 h-3.5 text-purple-400" />
-                    {strategy.recommendedBreakdown?.videoReels || 4} Short-Form Video Reels
+                    ~{videoCount} Short-Form Video Reels
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold bg-blue-500/15 border border-blue-500/30 text-blue-200">
                     <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                    {strategy.recommendedBreakdown?.imagePosts || 6} Visual Cards & Carousels
+                    ~{imageCount} Visual Cards & Carousels
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    Formats: Instagram, LinkedIn, Twitter/X, TikTok
+                    Platforms: {(selectedPlatforms && selectedPlatforms.length ? selectedPlatforms : ['Instagram', 'LinkedIn', 'Twitter/X', 'TikTok']).join(', ')}
                   </span>
                 </div>
               </div>
@@ -546,7 +559,7 @@ export default function StrategyRecommendation({
                   className="px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-xs font-semibold text-slate-300 border border-slate-700/80 flex items-center justify-center gap-2 transition cursor-pointer"
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>{showCustomizer ? 'Close Adjustments' : 'Customize Days / Post Count'}</span>
+                  <span>{showCustomizer ? 'Close Adjustments' : 'Customize Days'}</span>
                 </button>
               </div>
             </div>
@@ -579,27 +592,18 @@ export default function StrategyRecommendation({
                     </div>
                   </div>
 
-                  {/* Post Count Slider */}
+                  {/* Derived post count — auto: days × platforms */}
                   <div className="space-y-2">
                     <div className="flex justify-between text-xs font-semibold">
                       <span className="text-slate-300 flex items-center gap-1.5">
                         <Layers className="w-3.5 h-3.5 text-purple-400" />
-                        Total Posts to Generate
+                        Total Posts (auto-calculated)
                       </span>
-                      <span className="text-purple-400 font-bold font-mono">{totalPosts} Posts</span>
+                      <span className="text-purple-400 font-bold font-mono">{derivedTotal} Posts</span>
                     </div>
-                    <input
-                      type="range"
-                      min={3}
-                      max={25}
-                      value={totalPosts}
-                      onChange={(e) => setTotalPosts(parseInt(e.target.value))}
-                      className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                    />
-                    <div className="flex justify-between text-[10px] text-slate-500">
-                      <span>5 posts</span>
-                      <span>10 posts (Recommended)</span>
-                      <span>25 posts (Power Blast)</span>
+                    <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-500/25 text-xs text-purple-200 leading-relaxed">
+                      {days} days × {perDay} selected platforms = <span className="font-bold text-white">{derivedTotal} posts</span>.
+                      Every single day folder will contain a post for EVERY platform you selected — post on all of them daily, or just pick the ones you want. Nothing is ever missing.
                     </div>
                   </div>
                 </div>
@@ -611,7 +615,7 @@ export default function StrategyRecommendation({
                     onClick={handleCustomConfirm}
                     className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
                   >
-                    <span>Generate Custom {totalPosts} Posts Over {days} Days</span>
+                    <span>Generate {derivedTotal} Posts ({days} Days × {perDay} Platforms)</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>

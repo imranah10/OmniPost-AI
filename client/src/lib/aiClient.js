@@ -525,7 +525,45 @@ function heuristicStrategy(websiteData) {
 /* ------------------------------------------------------------------ */
 /* Step 2 — Full campaign                                              */
 /* ------------------------------------------------------------------ */
-function buildVideoScript({ post, strategy, websiteData, feature }) {
+
+// TOOL WORKING NARRATION — the video prompts must describe HOW the tool
+// actually works (open → input → process → result) so a video made from the
+// real screenshots demonstrates the tool working, not a generic ad.
+const normWorkingState = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+function toolWorkingSteps({ toolObj = {}, toolName, studio, brandName, domain }) {
+  const before = String(toolObj.testedInput || '').trim();
+  const after = String(toolObj.testedOutput || '').trim();
+  const desc = String(toolObj.description || '').replace(/\s+/g, ' ').trim();
+  const genericStates =
+    !before || !after || normWorkingState(before) === normWorkingState(after) ||
+    /^(the )?(raw )?input/i.test(before) || /^(the )?(finished )?(live )?output/i.test(after);
+
+  const input = genericStates ? 'the task input (paste, upload or select — whatever the tool asks for)' : before;
+  const result = genericStates ? (after || 'the finished result rendered on screen') : after;
+  const work = desc && desc.length > 24
+    ? `does the job for you: ${desc.charAt(0).toLowerCase() + desc.slice(1)}`
+    : 'processes the input instantly and returns the finished result';
+
+  return {
+    input,
+    result,
+    steps: [
+      { label: 'OPEN', text: `The ${studio || 'tool'} screen loads — "${toolName}" front and center${domain ? ` on ${domain}` : ` on ${brandName}`}.` },
+      { label: 'INPUT', text: `The user gives it: ${input}.` },
+      { label: 'PROCESS', text: `It ${work}.` },
+      { label: 'RESULT', text: `The finished result appears instantly: ${result}` },
+    ],
+  };
+}
+
+function buildVideoScript({ post, strategy, websiteData, feature, toolObj = {} }) {
+  const brandName = strategy?.brandName || 'Brand';
+  const domain = websiteData?.domain || '';
+  const toolName = toolObj?.name || String(feature || 'the tool').replace(/\s*\(.*\)\s*$/, '');
+  const studio = toolObj?.studio || String(feature || '').replace(/^.*\((.*)\)\s*$/, '$1');
+  const { steps } = toolWorkingSteps({ toolObj, toolName, studio, brandName, domain });
+
   return {
     duration: '30s',
     audioVibe: 'Energetic Lo-Fi Tech Beat (128 BPM)',
@@ -533,30 +571,30 @@ function buildVideoScript({ post, strategy, websiteData, feature }) {
       {
         sceneNumber: 1,
         time: '0:00 - 0:03',
-        visualDirection: `Fast-paced zoom onto ${strategy.brandName} visuals with dynamic text overlay.`,
+        visualDirection: `Fast-paced zoom onto the REAL "${toolName}" interface of ${brandName} — screen-record style over the actual UI (use screenshot_tool_live.jpg as the base frame). No stock footage.`,
         onScreenText: String(post.hook).slice(0, 48),
-        voiceoverAudio: 'Stop doing this manually. Here is the future you have been waiting for.',
+        voiceoverAudio: 'Stop doing this manually. Watch how fast this is.',
       },
       {
         sceneNumber: 2,
-        time: '0:03 - 0:15',
-        visualDirection: `Close-up demonstration: ${feature}. Snappy transitions.`,
-        onScreenText: 'Built for speed. Designed for results.',
-        voiceoverAudio: `${strategy.brandName} handles the heavy lifting instantly, so you can focus on what matters.`,
+        time: '0:03 - 0:10',
+        visualDirection: `SHOW THE TOOL WORKING — Step 1→2: ${steps[0].text} ${steps[1].text} Animate it over the real screenshots (screenshot_tool_live.jpg / screenshot_before_input.jpg): cursor moves, input lands.`,
+        onScreenText: 'Step 1: open it  →  Step 2: give it the input',
+        voiceoverAudio: steps[1].text,
       },
       {
         sceneNumber: 3,
-        time: '0:15 - 0:25',
-        visualDirection: 'Showcase premium results and happy customer moments.',
-        onScreenText: 'Real results. Zero stress.',
-        voiceoverAudio: 'Imagine this running for you 24/7, completely on autopilot.',
+        time: '0:10 - 0:20',
+        visualDirection: `SHOW THE RESULT — Step 3→4: ${steps[2].text} ${steps[3].text} Use screenshot_after_output.jpg as the proof frame; the finished result lands on screen with a satisfying resolve.`,
+        onScreenText: 'It works. Instantly.',
+        voiceoverAudio: `${steps[3].text} That is the whole workflow — seconds, not hours.`,
       },
       {
         sceneNumber: 4,
-        time: '0:25 - 0:30',
-        visualDirection: `Final CTA screen with ${websiteData.domain} branding.`,
-        onScreenText: `Try it now — ${websiteData.domain}`,
-        voiceoverAudio: 'Link in bio. Start today and feel the difference.',
+        time: '0:20 - 0:30',
+        visualDirection: `Final CTA screen: the ${brandName} brand mark, the tool name in big type, and ${domain || 'the website'} URL.`,
+        onScreenText: `Try it now — ${domain || brandName}`,
+        voiceoverAudio: 'Free, no signup, runs right in your browser. Link below.',
       },
     ],
   };
@@ -714,18 +752,25 @@ Prompt: Create a high-converting commercial advertising visual for "${brandName}
 
   const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio})${b.single ? ` — delivers "${b.after}" instantly` : ` — takes "${b.before}" and returns "${b.after}" instantly`}. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. No embedded text or watermarks.`;
 
-  const aiVideoPrompt = `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
-(💡 TIP FOR VIRAL COMMERCIAL REEL: Upload 'screenshot_tool_live.jpg' as the START FRAME, and reuse the same live UI as the TRANSFORMATION / CLIMAX FRAME!)
+  const working = toolWorkingSteps({ toolObj, toolName: b.tool, studio: b.studio, brandName, domain });
+  const workingBlock = working.steps.map((s, i) => `${i + 1}. ${s.label}: ${s.text}`).join('\n');
 
-Prompt: A cinematic 9:16 vertical commercial video reel for "${toolName}" on ${brandName} — angle: ${angle.key}.
+  const aiVideoPrompt = `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
+(💡 TIP: Upload 'screenshot_tool_live.jpg' as the START FRAME and 'screenshot_after_output.jpg' as the PROOF frame — the video must SHOW THE TOOL ACTUALLY WORKING, step by step, on the real UI!)
+
+HOW "${toolName}" WORKS — THE VIDEO MUST DEMONSTRATE THIS EXACT WORKFLOW:
+${workingBlock}
+
+Prompt: A cinematic 9:16 vertical demo-commercial video reel for "${toolName}" on ${brandName} — angle: ${angle.key}.
 - Scene 1 (0:00 - 0:03) HOOK: ${angle.camera.split(',')[0]}. On-screen bold typography: "${b.hookShort}".
-- Scene 2 (0:03 - 0:06) ${b.single ? 'SHOWCASE' : 'TRANSFORMATION'}: ${angle.detail}. The live result (${b.after}) renders at 0-second latency.
-- Scene 3 (0:06 - 0:09) PROOF: The interface shown in 'screenshot_tool_live.jpg' fully alive — ${b.after}.
-- Scene 4 (0:09 - 0:10) CTA: Cinematic settle onto ${brandName} branding. On-screen CTA: "${post?.callToAction || `Try ${toolName} Now ➔ Visit ${domain}`}".
+- Scene 2 (0:03 - 0:07) THE TOOL WORKING — OPEN + INPUT: ${working.steps[0].text} ${working.steps[1].text} Screen-record style over the real interface (start frame = screenshot_tool_live.jpg): cursor moves, the input lands.
+- Scene 3 (0:07 - 0:11) THE TOOL WORKING — PROCESS + RESULT: ${working.steps[2].text} ${working.steps[3].text} (proof frame = screenshot_after_output.jpg).
+- Scene 4 (0:11 - 0:14) PROOF STING: ${angle.detail}. The live result (${b.after}) lands at 0-second latency.
+- Scene 5 (0:14 - 0:18) CTA: Cinematic settle onto ${brandName} branding. On-screen CTA: "${post?.callToAction || `Try ${toolName} Now ➔ Visit ${domain}`}".
 - Camera & Motion: ${angle.camera}. 4K 60fps photorealistic commercial grade.
 - Audio Vibe: ${angle.audio}.`;
 
-  const directVideoPrompt = `Cinematic 9:16 vertical commercial reel for "${toolName}" by ${brandName}: ${angle.camera}. ${b.single ? `The scene showcases the live result: ${b.after}` : `The scene transforms as ${angle.detail}, revealing the live result: ${b.after}`}. Style: ${angle.style}. End on the ${brandName} brand mark with call to action "${b.ctaShort}". Audio: ${angle.audio}. Photorealistic, 4K, high detail.`;
+  const directVideoPrompt = `Cinematic 9:16 vertical demo reel for "${toolName}" by ${brandName}: it shows the tool ACTUALLY WORKING — open "${toolName}", give it ${working.input}, and the result "${working.result}" lands instantly on screen. ${angle.camera}. ${b.single ? `The scene showcases the live result: ${b.after}` : `The scene transforms as ${angle.detail}, revealing the live result: ${b.after}`}. Style: ${angle.style}. End on the ${brandName} brand mark with call to action "${b.ctaShort}". Audio: ${angle.audio}. Photorealistic, 4K, high detail.`;
 
   return { aiImagePrompt, aiVideoPrompt, directImagePrompt, directVideoPrompt, angleKey: angle.key };
 }
@@ -950,7 +995,54 @@ Copy and paste this entire document into ChatGPT (GPT-4o) or Claude, then ask:
 ==============================================================================`;
 }
 
-function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, carouselPrompt, videoAt, platforms, bestTimes, dayOf }) {
+// Platform-adapted captions — "jo bhi hota hai wo likha hona chahiye achha se
+// us tool ke bare me hi": Reddit gets a builder-voice write-up (zero hashtag
+// spam), X gets a ≤280-char cut, everything else gets the long-form skeleton.
+function platformAdaptedCaption({ platform, hook, benefit, brand, dom, tool, studio, customPrompt, carouselPrompt, isCarousel }) {
+  const focus = customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : '';
+  const carousel = carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : '';
+  const key = String(platform || '').toLowerCase();
+
+  if (key.includes('reddit')) {
+    const benefitLine = benefit.charAt(0).toUpperCase() + benefit.slice(1);
+    const studioPhrase = brand && String(studio).includes(brand)
+      ? `one of the ${studio} tools`
+      : `one of the ${studio} tools on ${brand}`;
+    return `I keep coming back to ${tool.name} — ${studioPhrase} — so here's an honest write-up\n\n${benefitLine}\n\nWhy I actually use it instead of the usual suspects:\n• runs entirely in the browser — nothing gets uploaded anywhere\n• no account, no paywall, no "3 free uses then subscribe" nonsense\n• it does the one job fast and gets out of the way${customPrompt ? `\n\nContext: ${customPrompt}` : ''}\n\nIf that sounds useful: ${dom}\n\nGenuinely curious what you'd want it to do next — happy to answer questions in the comments. (Fitting subs for this kind of post: r/SideProject, r/InternetIsBeautiful, r/productivity — pick the one that matches your audience.)`;
+  }
+
+  if (key.includes('twitter') || key === 'x') {
+    const brandTag = `#${brand.replace(/[^a-zA-Z0-9]/g, '')}`;
+    return `${hook}\n\n${benefit.charAt(0).toUpperCase() + benefit.slice(1)} — free, no signup, runs in your browser.\n\n→ ${dom} ${brandTag}`;
+  }
+
+  // LinkedIn keeps it substance-first; Instagram / TikTok / Facebook / YouTube
+  // get the rotating long-form skeletons.
+  const capSkeletons = [
+    () => `${hook}\n\n${benefit}.\n\n✅ Works instantly in your browser\n✅ No installs, no learning curve\n✅ Part of ${brand}'s ${studio} suite${focus}${carousel}\n\n👉 Open ${tool.name} at ${dom}`,
+    () => `Quick one: ${tool.name}.\n\nMost ${studio} tools make you wait, sign up, or upload your files. ${brand} does the opposite — ${benefit}.\n\n• Fast: results in seconds\n• Private: runs on your device\n• Free: no paywall surprises${focus}${carousel}\n\nSee it live → ${dom}`,
+    () => `We built ${tool.name} for one reason: ${benefit.replace(/^[A-Z]/, (c) => c.toLowerCase())} without the usual friction.\n\nIt lives in ${studio} on ${brand}, it's free, and it takes about 60 seconds to get value out of it.${focus}${carousel}\n\nTry it now: ${dom}`,
+    () => `3 reasons ${tool.name} earns its spot in your bookmarks:\n\n1️⃣ ${benefit.charAt(0).toUpperCase() + benefit.slice(1)}\n2️⃣ Zero data leaves your browser\n3️⃣ It's part of the full ${studio} suite on ${brand}${focus}${carousel}\n\nTest it yourself → ${dom}`,
+    () => `Unpopular opinion: ${studio} tools don't need accounts, uploads or subscriptions.\n\n${tool.name} on ${brand} proves it — ${benefit}.\n\nBookmark it, thank yourself later.${focus}${carousel}\n\n${dom}`,
+  ];
+  const skeletonIndex = Math.abs(`${hook}`.length + tool.name.length) % capSkeletons.length;
+  return capSkeletons[skeletonIndex]();
+}
+
+// Platform-aware hashtag policy: Reddit gets NONE (hashtags don't exist
+// there), X gets max 2, LinkedIn max 5, everything else the full set.
+function platformHashtags(platform, baseTags, isAgency) {
+  const key = String(platform || '').toLowerCase();
+  if (key.includes('reddit')) return [];
+  const generic = isAgency
+    ? [...baseTags, '#BusinessGrowth', '#Leadership', '#GlobalWorkforce', '#Engineering', '#FutureOfWork']
+    : [...baseTags, '#Innovation', '#TechSolutions', '#Productivity', '#NextGenTech'];
+  if (key.includes('twitter') || key === 'x') return generic.slice(0, 2);
+  if (key.includes('linkedin')) return generic.slice(0, 5);
+  return generic;
+}
+
+function buildTemplateCampaign({ websiteData, strategy, days, customPrompt, carouselPrompt, videoAt, platforms, bestTimes, onlyDays = null }) {
   const tools = (websiteData.discoveredTools && websiteData.discoveredTools.length > 0)
     ? websiteData.discoveredTools
     : (websiteData.studios || []).map((s) => ({
@@ -964,107 +1056,107 @@ function buildTemplateCampaign({ websiteData, strategy, totalPosts, days, custom
   );
 
   const results = [];
-  for (let i = 0; i < totalPosts; i++) {
-    const isVideo = videoAt.has(i);
-    const isCarousel = !isVideo && i % 3 === 0;
-    const platform = platforms[i % platforms.length];
-    const tool = tools[i % tools.length];
-    const studio = tool.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
+  const dayList = Array.isArray(onlyDays) && onlyDays.length
+    ? onlyDays
+    : Array.from({ length: days }, (_, d) => d + 1);
+  let i = 0;
 
-    // CONTENT DIVERSITY ENGINE — every post gets a DIFFERENT hook formula,
-    // caption skeleton and CTA shape (rotated), built from the tool's own
-    // description so no two posts read like twins.
-    const tDesc = (tool.description || `Everything ${tool.name} can do for you`).replace(/\s+/g, ' ').trim();
-    const benefit = tDesc.length > 24 ? tDesc.charAt(0).toLowerCase() + tDesc.slice(1) : `Get ${tool.name} done in seconds, right in your browser`;
-    const brand = strategy.brandName;
-    const dom = websiteData.domain;
-    const hookStyles = [
-      () => `${tool.name}: the ${studio} shortcut nobody told you about`,
-      () => `Stop losing hours — ${tool.name} on ${brand} does it in seconds`,
-      () => `What can ${tool.name} actually do? More than you think 👀`,
-      () => `The ${studio} workflow you'll wish you found sooner: ${tool.name}`,
-      () => `${benefit.charAt(0).toUpperCase() + benefit.slice(1)} — no signup, no uploads, zero waiting`,
-      () => `POV: you just discovered ${tool.name} inside ${brand}`,
-      () => `Why are teams quietly switching to ${tool.name}?`,
-      () => `${tool.name} in ${studio} — try it once and you'll keep coming back`,
-      () => `Everything you wanted from a ${studio} tool, minus the bloat: ${tool.name}`,
-      () => `Your data never leaves your browser with ${tool.name} — here's why that matters`,
-      () => `From zero to done: ${tool.name} in under a minute`,
-      () => `The underrated ${studio} pick on ${brand}: ${tool.name}`,
-    ];
-    const hook = hookStyles[i % hookStyles.length]();
+  // COVERAGE GUARANTEE: for EVERY day, EVERY selected platform gets its own
+  // post — the user can post on all of them each day (post ya na post, content
+  // aana chahiye). Tool rotation continues globally so posts never twin.
+  for (const dayNum of dayList) {
+    for (const platform of platforms) {
+      const isVideo = videoAt.has(i);
+      const isCarousel = !isVideo && i % 3 === 0;
+      const tool = tools[i % tools.length];
+      const studio = tool.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
 
-    const capSkeletons = [
-      () => `${hook}\n\n${benefit}.\n\n✅ Works instantly in your browser\n✅ No installs, no learning curve\n✅ Part of ${brand}'s ${studio} suite${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\n👉 Open ${tool.name} at ${dom}`,
-      () => `Quick one: ${tool.name}.\n\nMost ${studio} tools make you wait, sign up, or upload your files. ${brand} does the opposite — ${benefit}.\n\n• Fast: results in seconds\n• Private: runs on your device\n• Free: no paywall surprises${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\nSee it live → ${dom}`,
-      () => `We built ${tool.name} for one reason: ${benefit.replace(/^[A-Z]/, (c) => c.toLowerCase())} without the usual friction.\n\nIt lives in ${studio} on ${brand}, it's free, and it takes about 60 seconds to get value out of it.${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\nTry it now: ${dom}`,
-      () => `3 reasons ${tool.name} earns its spot in your bookmarks:\n\n1️⃣ ${benefit.charAt(0).toUpperCase() + benefit.slice(1)}\n2️⃣ Zero data leaves your browser\n3️⃣ It's part of the full ${studio} suite on ${brand}${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\nTest it yourself → ${dom}`,
-      () => `Unpopular opinion: ${studio} tools don't need accounts, uploads or subscriptions.\n\n${tool.name} on ${brand} proves it — ${benefit}.\n\nBookmark it, thank yourself later.${customPrompt ? `\n\n🎯 Focus: ${customPrompt}` : ''}${carouselPrompt && isCarousel ? `\n\n🎠 Carousel focus: ${carouselPrompt}` : ''}\n\n${dom}`,
-    ];
-    const caption = capSkeletons[Math.floor(i / hookStyles.length) % capSkeletons.length]();
+      // CONTENT DIVERSITY ENGINE — every post gets a DIFFERENT hook formula,
+      // caption skeleton and CTA shape (rotated), built from the tool's own
+      // description so no two posts read like twins.
+      const tDesc = (tool.description || `Everything ${tool.name} can do for you`).replace(/\s+/g, ' ').trim();
+      const benefit = tDesc.length > 24 ? tDesc.charAt(0).toLowerCase() + tDesc.slice(1) : `Get ${tool.name} done in seconds, right in your browser`;
+      const brand = strategy.brandName;
+      const dom = websiteData.domain;
+      const hookStyles = [
+        () => `${tool.name}: the ${studio} shortcut nobody told you about`,
+        () => `Stop losing hours — ${tool.name} on ${brand} does it in seconds`,
+        () => `What can ${tool.name} actually do? More than you think 👀`,
+        () => `The ${studio} workflow you'll wish you found sooner: ${tool.name}`,
+        () => `${benefit.charAt(0).toUpperCase() + benefit.slice(1)} — no signup, no uploads, zero waiting`,
+        () => `POV: you just discovered ${tool.name} inside ${brand}`,
+        () => `Why are teams quietly switching to ${tool.name}?`,
+        () => `${tool.name} in ${studio} — try it once and you'll keep coming back`,
+        () => `Everything you wanted from a ${studio} tool, minus the bloat: ${tool.name}`,
+        () => `Your data never leaves your browser with ${tool.name} — here's why that matters`,
+        () => `From zero to done: ${tool.name} in under a minute`,
+        () => `The underrated ${studio} pick on ${brand}: ${tool.name}`,
+      ];
+      const hook = hookStyles[i % hookStyles.length]();
 
-    const ctaVariants = [
-      `Explore ${tool.name} 👉 ${dom}`,
-      `Try ${tool.name} free → ${dom}`,
-      `Open the ${studio} suite: ${dom}`,
-      `${tool.name} is one click away: ${dom}`,
-      `See it in action 👉 ${dom}`,
-    ];
-    const cta = ctaVariants[i % ctaVariants.length];
+      const caption = platformAdaptedCaption({ platform, hook, benefit, brand, dom, tool, studio, customPrompt, carouselPrompt, isCarousel });
 
-    const brandClean = strategy.brandName.replace(/[^a-zA-Z0-9]/g, '');
-    const toolClean = tool.name.replace(/[^a-zA-Z0-9]/g, '');
-    const studioClean = studio.replace(/[^a-zA-Z0-9]/g, '');
+      const ctaVariants = [
+        `Explore ${tool.name} 👉 ${dom}`,
+        `Try ${tool.name} free → ${dom}`,
+        `Open the ${studio} suite: ${dom}`,
+        `${tool.name} is one click away: ${dom}`,
+        `See it in action 👉 ${dom}`,
+      ];
+      const cta = ctaVariants[i % ctaVariants.length];
 
-    const hashtags = isAgency
-      ? [`#${brandClean}`, `#${toolClean}`, `#${studioClean}`, '#BusinessGrowth', '#Leadership', '#GlobalWorkforce', '#Engineering', '#FutureOfWork']
-      : [`#${brandClean}`, `#${toolClean}`, `#${studioClean}`, '#Innovation', '#TechSolutions', '#Productivity', '#NextGenTech'];
+      const brandClean = strategy.brandName.replace(/[^a-zA-Z0-9]/g, '');
+      const toolClean = tool.name.replace(/[^a-zA-Z0-9]/g, '');
+      const studioClean = studio.replace(/[^a-zA-Z0-9]/g, '');
+      const hashtags = platformHashtags(platform, [`#${brandClean}`, `#${toolClean}`, `#${studioClean}`], isAgency);
 
-    const prompts = buildPostAIPrompts({
-      strategy,
-      post: { hook, callToAction: cta },
-      toolName: tool.name,
-      studio,
-      toolObj: tool,
-      websiteData,
-      postIndex: i,
-    });
+      const prompts = buildPostAIPrompts({
+        strategy,
+        post: { hook, callToAction: cta },
+        toolName: tool.name,
+        studio,
+        toolObj: tool,
+        websiteData,
+        postIndex: i,
+      });
 
-    // Screenshot of THIS post's own tool (matched by tool URL / id / studio —
-    // never a modulo crawl-order page, which could be a blog or legal page).
-    const shot = shotForTool(websiteData, { toolName: tool.name, studio, toolUrl: tool.url });
+      // Screenshot of THIS post's own tool (matched by tool URL / id / studio —
+      // never a modulo crawl-order page, which could be a blog or legal page).
+      const shot = shotForTool(websiteData, { toolName: tool.name, studio, toolUrl: tool.url });
 
-    results.push({
-      id: `post-${i + 1}`,
-      day: `Day ${dayOf(i)}`,
-      platform,
-      contentType: isVideo ? 'Video Reel / Short' : (isCarousel ? 'Carousel Graphic' : 'Image Post'),
-      carouselBrief: isCarousel ? (carouselPrompt || '') : '',
-      studio,
-      toolName: tool.name,
-      toolUrl: tool.url || '',
-      hook,
-      caption,
-      hashtags,
-      callToAction: cta,
-      bestTime: bestTimes[i % bestTimes.length],
-      inputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
-      outputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
-      screenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
-      rawScreenshot: shot?.webUrl || websiteData.screenshotUrl,
-      testedInput: tool.testedInput || 'Interactive Parameters',
-      testedOutput: tool.testedOutput || 'Live Computation Executed',
-      imagePrompt: prompts.aiImagePrompt,
-      aiImagePrompt: prompts.aiImagePrompt,
-      geminiImagePrompt: prompts.directImagePrompt,
-      aiVideoPrompt: prompts.aiVideoPrompt,
-      geminiVideoPrompt: prompts.directVideoPrompt,
-      visualAngle: prompts.angleKey,
-      videoScript: isVideo
-        ? buildVideoScript({ post: { hook, callToAction: cta }, strategy, websiteData, feature: `${tool.name} (${studio})` })
-        : null,
-      engine: 'dynamic-template',
-    });
+      results.push({
+        id: `post-${results.length + 1}`,
+        day: `Day ${dayNum}`,
+        platform,
+        contentType: isVideo ? 'Video Reel / Short' : (isCarousel ? 'Carousel Graphic' : 'Image Post'),
+        carouselBrief: isCarousel ? (carouselPrompt || '') : '',
+        studio,
+        toolName: tool.name,
+        toolUrl: tool.url || '',
+        hook,
+        caption,
+        hashtags,
+        callToAction: cta,
+        bestTime: bestTimes[i % bestTimes.length],
+        inputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
+        outputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
+        screenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
+        rawScreenshot: shot?.webUrl || websiteData.screenshotUrl,
+        testedInput: tool.testedInput || 'Interactive Parameters',
+        testedOutput: tool.testedOutput || 'Live Computation Executed',
+        imagePrompt: prompts.aiImagePrompt,
+        aiImagePrompt: prompts.aiImagePrompt,
+        geminiImagePrompt: prompts.directImagePrompt,
+        aiVideoPrompt: prompts.aiVideoPrompt,
+        geminiVideoPrompt: prompts.directVideoPrompt,
+        visualAngle: prompts.angleKey,
+        videoScript: isVideo
+          ? buildVideoScript({ post: { hook, callToAction: cta }, strategy, websiteData, feature: `${tool.name} (${studio})`, toolObj: tool })
+          : null,
+        engine: 'dynamic-template',
+      });
+      i++;
+    }
   }
   return results;
 }
@@ -1078,28 +1170,143 @@ export async function generateFullCampaign({
   carouselPrompt,
   selectedPlatforms,
   userApiKey,
+  onProgress = () => {},
 }) {
-  const videoTarget = Math.max(1, Math.min(totalPosts - 1, strategy.recommendedBreakdown?.videoReels || Math.round(totalPosts * 0.4)));
-
-  const videoAt = new Set();
-  for (let j = 0; j < videoTarget; j++) {
-    videoAt.add(Math.min(totalPosts - 1, Math.floor(((j + 0.5) * totalPosts) / videoTarget)));
-  }
-
   const platforms = selectedPlatforms && selectedPlatforms.length
     ? selectedPlatforms
     : (strategy.primaryPlatforms?.length ? strategy.primaryPlatforms : ['Instagram', 'LinkedIn', 'Twitter/X', 'TikTok']);
+  const safeDays = Math.max(1, Math.min(60, parseInt(days) || 14));
+  const perDay = platforms.length;
+  // COVERAGE GUARANTEE: exactly ONE post per selected platform per day —
+  // "har din sabhi platforms ka content aana chahiye". The old independent
+  // totalPosts spread posts unevenly, so most day folders held a single
+  // platform. Now total = days x platforms, position-locked.
+  const total = safeDays * perDay;
+  const dayOf = (i) => Math.floor(i / perDay) + 1;
+  const platformFor = (i) => platforms[i % perDay];
+
+  const videoTarget = Math.max(1, Math.min(total - 1, Math.round(total * 0.35)));
+  const videoAt = new Set();
+  for (let j = 0; j < videoTarget; j++) {
+    videoAt.add(Math.min(total - 1, Math.floor(((j + 0.5) * total) / videoTarget)));
+  }
+
   const bestTimes = ['9:00 AM', '1:00 PM', '6:30 PM', '8:00 PM'];
-  const dayOf = (i) => Math.min(days, Math.floor((i * days) / totalPosts) + 1);
 
   const studiosList = (websiteData.studios || []).join(', ') || 'Platform Offerings';
   const toolsList = (websiteData.discoveredTools || []).slice(0, 40).map((t) => `"${t.name}" (${t.studio})${t.description ? ` — ${t.description.slice(0, 60)}` : ''}`).join('; ');
 
+  // Shared finalizer — turns one AI post object into the canonical post shape.
+  // Day + platform are assigned BY POSITION (i), never by what the model wrote,
+  // so every day x platform slot exists exactly once.
+  const finalizePost = (p, i) => {
+    const mustBeVideo = videoAt.has(i) || Boolean(p.videoScript && p.videoScript.scenes && p.videoScript.scenes.length);
+    // Resolve the REAL tool object by NAME — pairing a post about tool X with
+    // tool Y's URL, description and screenshot would be wrong.
+    const toolObj = toolObjectForPost(websiteData, p.toolName)
+      || (websiteData.discoveredTools || [])[i % (websiteData.discoveredTools?.length || 1)]
+      || {};
+    const studio = p.studio || toolObj.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
+    const toolName = p.toolName || toolObj.name || `Offering ${i + 1}`;
+    const hook = String(p.hook || `Transform your operations with ${toolName} in ${studio}`).slice(0, 140);
+    const cta = String(p.callToAction || `Discover ${toolName} on ${websiteData.domain}`).slice(0, 200);
+
+    const script = mustBeVideo
+      ? (p.videoScript && p.videoScript.scenes && p.videoScript.scenes.length
+          ? p.videoScript
+          : buildVideoScript({ post: { hook, callToAction: cta }, strategy, websiteData, feature: `${toolName} (${studio})`, toolObj }))
+      : null;
+
+    const finalPlatform = platformFor(i);
+    const platformKey = String(finalPlatform || '').toLowerCase();
+
+    const brandTag = `#${String(strategy.brandName || '').replace(/[^a-zA-Z0-9]/g, '')}`;
+    const industryTag = `#${String(strategy.industry || '').split(' ')[0].replace(/[^a-zA-Z0-9]/g, '')}`;
+    // Screenshot of THIS post's own tool (name-resolved) — never modulo.
+    const shot = shotForTool(websiteData, { toolName, studio, toolUrl: toolObj?.url });
+
+    const prompts = buildPostAIPrompts({
+      strategy,
+      post: { hook, callToAction: cta },
+      toolName,
+      studio,
+      toolObj,
+      websiteData,
+      postIndex: i,
+    });
+
+    // Dedicated AI-authored carousel slide plan (user's carousel prompt applied)
+    const providedSlides = Array.isArray(p.carouselSlides)
+      ? p.carouselSlides
+          .filter((s) => s && (s.headline || s.kicker))
+          .slice(0, 6)
+          .map((s) => ({
+            kicker: String(s.kicker || '').slice(0, 30),
+            headline: String(s.headline || '').slice(0, 120),
+            body: String(s.body || '').slice(0, 160),
+          }))
+      : null;
+
+    // Reddit ships ZERO hashtags (they don't exist there).
+    const fallbackTags = platformKey.includes('reddit') ? [] : [
+      brandTag, industryTag,
+      `#${String(toolName).replace(/[^a-zA-Z0-9]/g, '')}`,
+      `#${String(studio).replace(/[^a-zA-Z0-9]/g, '')}`,
+      '#BusinessGrowth', '#Innovation', '#FutureOfWork',
+    ];
+
+    return {
+      id: `post-${i + 1}`,
+      day: `Day ${dayOf(i)}`,
+      platform: finalPlatform,
+      contentType: mustBeVideo ? 'Video Reel / Short' : (i % 3 === 0 ? 'Carousel Graphic' : 'Image Post'),
+      studio,
+      toolName,
+      toolUrl: toolObj?.url || '',
+      hook,
+      caption: String(p.caption || '').slice(0, 2200),
+      hashtags: platformKey.includes('reddit')
+        ? []
+        : (Array.isArray(p.hashtags) && p.hashtags.length > 0 ? p.hashtags.slice(0, 14) : fallbackTags),
+      callToAction: cta,
+      bestTime: p.bestTime || bestTimes[i % bestTimes.length],
+      inputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
+      outputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
+      screenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
+      rawScreenshot: shot?.webUrl || websiteData.screenshotUrl,
+      testedInput: toolObj.testedInput || 'Interactive Parameters',
+      testedOutput: toolObj.testedOutput || 'Live Computation Executed',
+      imagePrompt: String(p.imagePrompt || prompts.aiImagePrompt).slice(0, 900),
+      aiImagePrompt: prompts.aiImagePrompt,
+      geminiImagePrompt: String(p.imagePrompt || prompts.directImagePrompt).slice(0, 900),
+      aiVideoPrompt: prompts.aiVideoPrompt,
+      geminiVideoPrompt: prompts.directVideoPrompt,
+      visualAngle: p.visualAngle || prompts.angleKey,
+      carouselContent: providedSlides,
+      videoScript: script,
+      engine: 'gemini',
+    };
+  };
+
   let campaignFallbackReason = '';
   if (userApiKey) {
+    // CHUNKED GENERATION — one Gemini call per 2-day window. Small responses
+    // never hit MAX_TOKENS, and each chunk carries ALL platforms for its days,
+    // so full day x platform coverage survives even huge campaigns.
+    const CHUNK_DAYS = 2;
+    const collected = [];
     try {
-      const prompt = `You are a world-class CMO and viral social media copywriter.
-Create an engaging ${days}-day campaign of exactly ${totalPosts} bespoke, viral posts for this brand:
+      for (let dStart = 1; dStart <= safeDays; dStart += CHUNK_DAYS) {
+        const dEnd = Math.min(dStart + CHUNK_DAYS - 1, safeDays);
+        const chunkCount = (dEnd - dStart + 1) * perDay;
+        const videoDesc = [];
+        for (let k = 0; k < chunkCount; k++) {
+          if (videoAt.has((dStart - 1) * perDay + k)) {
+            videoDesc.push(`${platforms[k % perDay]} on Day ${dStart + Math.floor(k / perDay)}`);
+          }
+        }
+        const prompt = `You are a world-class CMO and viral social media copywriter.
+Write the posts for DAYS ${dStart} to ${dEnd} of a ${safeDays}-day campaign for this brand:
 
 BRAND: ${strategy.brandName}
 INDUSTRY: ${strategy.industry}
@@ -1113,121 +1320,69 @@ KEY HEADINGS: ${(websiteData.h1s || []).concat(websiteData.h2s || []).slice(0, 8
 ${customPrompt ? `USER SPECIAL FOCUS: ${customPrompt}` : ''}
 ${carouselPrompt ? `CAROUSEL-SPECIFIC INSTRUCTIONS (MUST shape every "Carousel Graphic" post): ${carouselPrompt}` : ''}
 
+HARD STRUCTURE RULE:
+- Return EXACTLY ${chunkCount} posts IN THIS EXACT ORDER: Day ${dStart} first — one post per platform in this order [${platforms.join(', ')}] — then Day ${dEnd} in the same order (if within range).
+- Set each post's "day" and "platform" fields to match that order.
+
 CRITICAL COPYWRITING INSTRUCTIONS:
-- ONLY assign each post to one of these platforms: ${platforms.join(', ')}.
 - Write STRICTLY in the authentic voice of ${strategy.brandName} (${strategy.industry}).
 - Every post MUST spotlight a specific Section and a specific Capability from the list above.
-- ANTI-REPEAT RULE: every post must feature a DIFFERENT capability — never reuse the same tool for two posts while unfeatured tools remain. Hooks must each use a DIFFERENT angle (question, stat, pain-point, contrarian, listicle, how-to, myth-bust, social-proof, curiosity, direct benefit). Two posts must never share a sentence pattern.
+- ANTI-REPEAT RULE: never feature the same capability twice while unfeatured capabilities remain. Hooks must each use a DIFFERENT angle (question, stat, pain-point, contrarian, listicle, how-to, myth-bust, social-proof, curiosity, direct benefit).
 - Captions: first line = scroll-stopping hook naming the capability + outcome; body 3-5 punchy lines; CTA invites to ${websiteData.domain}.
-- Hashtags: 8-10 relevant, customized for ${strategy.brandName}.
-- imagePrompt: a vivid commercial advertising prompt for THIS post — it MUST be a UNIQUE visual concept unlike every other post in the campaign. Rotate compositions across posts: hero product shot, real-life scene, 3D device mockup, macro detail, flat-lay desk, typographic poster, testimonial moment, data visualization, cinematic workspace, neon CTA poster. No two posts may share the same setting, lighting or framing.
-- For every post whose contentType is "Carousel Graphic", ALSO include "carouselSlides": an array of EXACTLY 4 objects, each {"kicker": "short label (max 22 chars)", "headline": "punchy swipeable headline (max 90 chars)", "body": "one supporting line (optional, max 140 chars)"}. Slide 1 = scroll-stopping cover hook; slides 2-4 = ONE distinct idea per swipe (a dedicated \"Why it wins\" slide and the final CTA slide are rendered automatically — do not include them).
-- videoScript: for video posts (${[...videoAt].join(', ')}), 4 cinematic scenes with time, visualDirection, onScreenText, voiceoverAudio.
+- PLATFORM VOICE: adapt every caption to its platform — professional depth for LinkedIn, <=280 chars for X, hook-first for TikTok/Shorts; for Reddit write a genuine builder-voice write-up with ZERO hashtags.
+- Hashtags: 8-10 for Instagram/TikTok/Facebook, 3-5 for LinkedIn, 1-2 for X, ZERO for Reddit.
+- imagePrompt: a vivid commercial advertising prompt for THIS post — a UNIQUE visual concept unlike every other post. Rotate compositions: hero product shot, real-life scene, 3D device mockup, macro detail, flat-lay desk, typographic poster, testimonial moment, data visualization, cinematic workspace, neon CTA poster.
+- For every post whose contentType is "Carousel Graphic", ALSO include "carouselSlides": an array of EXACTLY 4 objects, each {"kicker": "short label (max 22 chars)", "headline": "punchy swipeable headline (max 90 chars)", "body": "one supporting line (optional, max 140 chars)"}. Slide 1 = scroll-stopping cover hook; slides 2-4 = ONE distinct idea per swipe.
+- videoScript: for video posts${videoDesc.length ? ` (${videoDesc.join(', ')})` : ' (none in this chunk — set videoScript to null)'}, 4 cinematic scenes with time, visualDirection, onScreenText, voiceoverAudio. The scenes must SHOW the tool actually working step by step (open the tool -> give the input -> it processes -> the real result appears), screen-recording style over the real UI.
 
 Return ONLY valid JSON:
-{ "posts": [ { "day": "Day 1", "platform": "${platforms[0]}", "contentType": "Video Reel / Short" OR "Image Post" OR "Carousel Graphic", "studio": "...", "toolName": "...", "hook": "...", "caption": "...", "hashtags": ["#Tag1"], "callToAction": "...", "bestTime": "9:00 AM", "imagePrompt": "...", "carouselSlides": null or [{ "kicker": "...", "headline": "...", "body": "..." } x4], "videoScript": null or { "duration": "30s", "audioVibe": "...", "scenes": [ { "sceneNumber": 1, "time": "0:00 - 0:03", "visualDirection": "...", "onScreenText": "...", "voiceoverAudio": "..." } ] } } ] }`;
+{ "posts": [ { "day": "Day ${dStart}", "platform": "${platforms[0]}", "contentType": "Video Reel / Short" OR "Image Post" OR "Carousel Graphic", "studio": "...", "toolName": "...", "hook": "...", "caption": "...", "hashtags": ["#Tag1"], "callToAction": "...", "bestTime": "9:00 AM", "imagePrompt": "...", "carouselSlides": null or [{ "kicker": "...", "headline": "...", "body": "..." } x4], "videoScript": null or { "duration": "30s", "audioVibe": "...", "scenes": [ { "sceneNumber": 1, "time": "0:00 - 0:03", "visualDirection": "...", "onScreenText": "...", "voiceoverAudio": "..." } ] } } ] }`;
 
-      const raw = await geminiText(userApiKey, prompt, 120000, { json: true, maxTokens: 8192 });
-      const parsed = parseJsonLoose(raw);
-      const aiPosts = Array.isArray(parsed) ? parsed : parsed?.posts;
-      if (Array.isArray(aiPosts) && aiPosts.length >= Math.min(3, totalPosts)) {
-        const postsResult = aiPosts.slice(0, totalPosts).map((p, i) => {
-          const mustBeVideo = videoAt.has(i) || Boolean(p.videoScript && p.videoScript.scenes && p.videoScript.scenes.length);
-          // Resolve the REAL tool object by NAME — the old code took
-          // discoveredTools[i % len], which could pair a post about tool X
-          // with tool Y's URL, description and screenshot.
-          const toolObj = toolObjectForPost(websiteData, p.toolName)
-            || (websiteData.discoveredTools || [])[i % (websiteData.discoveredTools?.length || 1)]
-            || {};
-          const studio = p.studio || toolObj.studio || (websiteData.studios || [])[i % (websiteData.studios?.length || 1)] || 'Core Services';
-          const toolName = p.toolName || toolObj.name || `Offering ${i + 1}`;
-          const hook = String(p.hook || `Transform your operations with ${toolName} in ${studio}`).slice(0, 140);
-          const cta = String(p.callToAction || `Discover ${toolName} on ${websiteData.domain}`).slice(0, 200);
-
-          const script = mustBeVideo
-            ? (p.videoScript && p.videoScript.scenes && p.videoScript.scenes.length
-                ? p.videoScript
-                : buildVideoScript({ post: { hook, callToAction: cta }, strategy, websiteData, feature: `${toolName} (${studio})` }))
-            : null;
-
-          const platformCandidate = platforms.find((pl) => pl.toLowerCase() === String(p.platform || '').toLowerCase());
-          const finalPlatform = platformCandidate || platforms[i % platforms.length];
-
-          const brandTag = `#${String(strategy.brandName || '').replace(/[^a-zA-Z0-9]/g, '')}`;
-          const industryTag = `#${String(strategy.industry || '').split(' ')[0].replace(/[^a-zA-Z0-9]/g, '')}`;
-          // Screenshot of THIS post's own tool (name-resolved) — never modulo.
-          const shot = shotForTool(websiteData, { toolName, studio, toolUrl: toolObj?.url });
-
-          const prompts = buildPostAIPrompts({
-            strategy,
-            post: { hook, callToAction: cta },
-            toolName,
-            studio,
-            toolObj,
-            websiteData,
-            postIndex: i,
-          });
-
-          // Dedicated AI-authored carousel slide plan (user's carousel prompt applied)
-          const providedSlides = Array.isArray(p.carouselSlides)
-            ? p.carouselSlides
-                .filter((s) => s && (s.headline || s.kicker))
-                .slice(0, 6)
-                .map((s) => ({
-                  kicker: String(s.kicker || '').slice(0, 30),
-                  headline: String(s.headline || '').slice(0, 120),
-                  body: String(s.body || '').slice(0, 160),
-                }))
-            : null;
-
-          return {
-            id: `post-${i + 1}`,
-            day: `Day ${dayOf(i)}`,
-            platform: finalPlatform,
-            contentType: mustBeVideo ? 'Video Reel / Short' : (i % 3 === 0 ? 'Carousel Graphic' : 'Image Post'),
-            studio,
-            toolName,
-            toolUrl: toolObj?.url || '',
-            hook,
-            caption: String(p.caption || '').slice(0, 2200),
-            hashtags: Array.isArray(p.hashtags) && p.hashtags.length > 0 ? p.hashtags.slice(0, 14) : [
-              brandTag, industryTag,
-              `#${String(toolName).replace(/[^a-zA-Z0-9]/g, '')}`,
-              `#${String(studio).replace(/[^a-zA-Z0-9]/g, '')}`,
-              '#BusinessGrowth', '#Innovation', '#FutureOfWork',
-            ],
-            callToAction: cta,
-            bestTime: p.bestTime || bestTimes[i % bestTimes.length],
-            inputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
-            outputScreenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
-            screenshotUrl: shot?.webUrl || websiteData.screenshotUrl,
-            rawScreenshot: shot?.webUrl || websiteData.screenshotUrl,
-            testedInput: toolObj.testedInput || 'Interactive Parameters',
-            testedOutput: toolObj.testedOutput || 'Live Computation Executed',
-            imagePrompt: String(p.imagePrompt || prompts.aiImagePrompt).slice(0, 900),
-            aiImagePrompt: prompts.aiImagePrompt,
-            geminiImagePrompt: String(p.imagePrompt || prompts.directImagePrompt).slice(0, 900),
-            aiVideoPrompt: prompts.aiVideoPrompt,
-            geminiVideoPrompt: prompts.directVideoPrompt,
-            visualAngle: p.visualAngle || prompts.angleKey,
-            carouselContent: providedSlides,
-            videoScript: script,
-            engine: 'gemini',
-          };
+        const raw = await geminiText(userApiKey, prompt, 120000, { json: true, maxTokens: 8192 });
+        const parsed = parseJsonLoose(raw);
+        const list = Array.isArray(parsed) ? parsed : parsed?.posts;
+        if (!Array.isArray(list) || !list.length) throw new Error('Gemini returned no usable campaign chunk JSON');
+        list.slice(0, chunkCount).forEach((p, k) => {
+          collected.push({ p, gi: (dStart - 1) * perDay + k });
         });
-
-        postsResult.masterBrandPrompt = generateMasterBrandPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
-        postsResult.masterImagePrompt = generateMasterImagePrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
-        postsResult.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
-        return postsResult;
+        onProgress({ index: Math.min(total, dEnd * perDay), total });
       }
-      campaignFallbackReason = 'Gemini response was not valid campaign JSON';
     } catch (err) {
       campaignFallbackReason = err.message || 'Gemini call failed';
     }
+
+    if (!campaignFallbackReason && collected.length >= Math.min(3, total)) {
+      const byGi = new Map(collected.map(({ p, gi }) => [gi, p]));
+      const postsResult = new Array(total).fill(null);
+      for (const [gi, p] of byGi) postsResult[gi] = finalizePost(p, gi);
+
+      // Patch any slot a chunk short-changed with template-engine posts for
+      // exactly those days — coverage stays 100% either way.
+      const missingDays = [...new Set(
+        Array.from({ length: safeDays }, (_, d) => d + 1)
+          .filter((d) => platforms.some((_, k) => !postsResult[(d - 1) * perDay + k]))
+      )];
+      if (missingDays.length) {
+        const fillers = buildTemplateCampaign({
+          websiteData, strategy, days: safeDays, customPrompt, carouselPrompt,
+          videoAt, platforms, bestTimes, onlyDays: missingDays,
+        });
+        const queue = [...fillers];
+        for (let gi = 0; gi < total; gi++) {
+          if (!postsResult[gi] && queue.length) postsResult[gi] = queue.shift();
+        }
+      }
+
+      const finalPosts = postsResult.filter(Boolean);
+      finalPosts.masterBrandPrompt = generateMasterBrandPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
+      finalPosts.masterImagePrompt = generateMasterImagePrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
+      finalPosts.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
+      return finalPosts;
+    }
+    if (!campaignFallbackReason) campaignFallbackReason = 'Gemini response was not valid campaign JSON';
   }
 
-  const templatePosts = buildTemplateCampaign({ websiteData, strategy, totalPosts, days, customPrompt, carouselPrompt, videoAt, platforms, bestTimes, dayOf });
+  const templatePosts = buildTemplateCampaign({ websiteData, strategy, days: safeDays, customPrompt, carouselPrompt, videoAt, platforms, bestTimes });
   templatePosts.masterBrandPrompt = generateMasterBrandPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterImagePrompt = generateMasterImagePrompt({ strategy, websiteData, tools: websiteData.discoveredTools });
   templatePosts.masterVideoPrompt = generateMasterVideoPrompt({ strategy, websiteData, tools: websiteData.discoveredTools });

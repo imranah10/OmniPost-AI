@@ -29,7 +29,8 @@ export default function UrlInputSection({ onStartAnalysis, isLoading }) {
     { id: 'Twitter/X', label: 'Twitter / X', icon: '🐦', desc: 'Viral Launch Threads' },
     { id: 'TikTok', label: 'TikTok', icon: '🎵', desc: 'Fast-Paced Demo Reels' },
     { id: 'YouTube Shorts', label: 'YT Shorts', icon: '🔴', desc: 'Tool Tutorials' },
-    { id: 'Facebook', label: 'Facebook', icon: '👥', desc: 'High-CTR Ad Posts' }
+    { id: 'Facebook', label: 'Facebook', icon: '👥', desc: 'High-CTR Ad Posts' },
+    { id: 'Reddit', label: 'Reddit', icon: '🤖', desc: 'Niche Subreddit Launches' }
   ];
 
   const sampleSites = [

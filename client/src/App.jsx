@@ -256,6 +256,7 @@ export default function App() {
             onConfirmGeneration={handleConfirmGeneration}
             isGeneratingCampaign={isGeneratingCampaign}
             onBack={handleBackToInput}
+            selectedPlatforms={selectedPlatforms}
           />
         )}
 

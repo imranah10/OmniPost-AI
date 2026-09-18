@@ -181,6 +181,32 @@ const PLATFORM_KB = {
       'Pin the campaign launch post to the page top during launch week.',
     ],
   },
+  reddit: {
+    id: 'Reddit',
+    emoji: '🤖',
+    formats: {
+      video: 'Native video upload — hosted directly in the post (external links get buried)',
+      image: 'Image post — 1:1 or 4:5 image + a real title that reads like a sentence, not an ad',
+      carousel: 'Multi-image gallery post — up to 20 images',
+    },
+    captionLimit: 'Title max 300 characters — the TITLE is the post. Body text is separate and unlimited. Redditors upvote substance, not slogans.',
+    hashtagRule: 'ZERO hashtags — hashtags do not work on Reddit. Mention relevant subreddits (r/…) inside the text instead.',
+    linkRule: 'Sneaky self-promo gets removed fast. Best pattern: value-first post, honest “I built this” disclosure, link in the body text. Follow each subreddit’s self-promotion rules.',
+    steps: [
+      'Open Reddit → search for the niche subreddit that fits this tool (r/SideProject, r/webdev, r/ArtificialInteligence, r/productivity — pick where the audience already lives).',
+      'Join the subreddit FIRST and read its rules + pinned posts — many communities restrict link posts for new members.',
+      'Tap the ➕ (Create) → “Post”.',
+      'Pick the type: Image/Video for the generated visual, or Text for a story-style launch write-up.',
+      'Paste the title from the day folder (≤ 300 chars). Add body text: what the tool does, the problem it solves, and the honest “free, no signup” line.',
+      'Add a flair if the subreddit requires one, then Post. 8–11 AM EST catches the most active voters.',
+    ],
+    tips: [
+      'The 9:1 rule: ~9 genuine comments/other contributions for every 1 self-promo, or mods will flag you as spam.',
+      'Reddit hates marketing speak. Write like a builder sharing, not a brand broadcasting — “I got tired of X, so I built/used Y”.',
+      'Reply to EVERY comment — the comment thread is where Reddit campaigns actually convert.',
+      'One subreddit per post. Blasting the same asset to 6 subs within the hour triggers spam filters.',
+    ],
+  },
   generic: {
     id: 'Platform',
     emoji: '🌐',
@@ -218,6 +244,7 @@ export function kbForPlatform(platform) {
   if (key.includes('tiktok')) return PLATFORM_KB.tiktok;
   if (key.includes('youtube') || key.includes('shorts')) return PLATFORM_KB['youtube shorts'];
   if (key.includes('facebook') || key.includes('meta')) return PLATFORM_KB.facebook;
+  if (key.includes('reddit')) return PLATFORM_KB.reddit;
   return PLATFORM_KB.generic;
 }
 
@@ -230,12 +257,14 @@ const fmtLimit = (s, n) => {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
 
-// Exact replica of the ZIP day-folder naming in CampaignDashboard.handleExportZip
+// Exact replica of the ZIP day-folder naming in CampaignDashboard.handleExportZip.
+// NEW STRUCTURE: every day is ONE folder — Day-X/<Platform>_<ToolName>/ — so a
+// single day folder holds EVERY selected platform's post for that day.
 export function dayFolderName(post, index = 0) {
   const daySlug = (post.day || `Day-${index + 1}`).replace(/\s+/g, '-');
   const platSlug = (post.platform || 'Social').replace(/[^a-zA-Z0-9]/g, '');
   const toolSlug = (post.toolName || `Post_${index + 1}`).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-  return `${daySlug}_${platSlug}_${toolSlug}`;
+  return `${daySlug}/${platSlug}_${toolSlug}`;
 }
 
 const formatRole = (ct) => {
@@ -297,7 +326,7 @@ export function buildPlatformPostingGuide({ strategy, websiteData, posts, select
     L.push(`| ${p.day || `Day-${i + 1}`} | ${kbForPlatform(p.platform).emoji} ${p.platform} | ${p.contentType} | ${asset} → visual | ${p.bestTime || '9:00 AM'} |`);
   });
   L.push('');
-  L.push(`Folder for every row: \`<Day>_<Platform>_<Tool>/\` — the name tells you the destination platform.`);
+  L.push(`Folder for every row: \`Day-X/<Platform>_<Tool>/\` — open the day folder and you will find EVERY selected platform's post for that day inside (the subfolder name tells you the destination platform).`);
   L.push('');
   L.push(`---`);
 
@@ -433,6 +462,7 @@ PLATFORM FORMAT RULES
 - TikTok: first line = hook; 3-5 hashtags incl. one trending; link-in-bio phrasing.
 - YouTube Shorts: title <=100 chars = hook; description carries details + link.
 - Facebook: first ~3 lines visible; 1-2 hashtags; link in first comment for reach.
+- Reddit: title <=300 chars IS the post; ZERO hashtags; builder voice ("I built this"), not marketing speak; link in body; follow each subreddit's rules.
 
 COPY REQUEST MENU (copy any line, fill the blank, paste into the AI)
 - "Write 10 hook variations for ${brand}'s ____________ feature."
@@ -475,16 +505,20 @@ AI visual prompt and reference screenshot — plus the exact steps to publish
 each post on each platform. No special software needed; everything opens on
 any phone or laptop.
 
-YOUR DAILY LOOP (about 15 minutes per post)
-1. Open today's day folder (name = Day-X_PLATFORM_ToolName — the middle part
-   IS the platform you post on).
-2. Make the visual: open ai_image_prompt.txt / ai_video_prompt.txt /
-   carousel_prompt.txt, copy the prompt into the Gemini app, ChatGPT,
-   Midjourney, Higgsfield or Runway — attach screenshot_tool_live.jpg from the
-   same folder for a 1:1 brand match. Save the result.
-3. Copy the caption + hashtags from post_ready_to_publish.txt.
+YOUR DAILY LOOP (about 15 minutes per platform post)
+1. Open today's Day-X folder — it contains EVERY selected platform's post
+   for that day (each in its own <Platform>_<ToolName> subfolder).
+2. Pick a platform subfolder. Make the visual: open ai_image_prompt.txt /
+   ai_video_prompt.txt / carousel_prompt.txt, copy the prompt into the Gemini
+   app, ChatGPT, Midjourney, Higgsfield or Runway — attach
+   screenshot_tool_live.jpg from the same folder for a 1:1 brand match.
+   Save the result.
+3. Copy the caption + hashtags from that subfolder's
+   post_ready_to_publish.txt.
 4. Open PLATFORM_POSTING_GUIDE.md, find that platform's section, follow its
    step-by-step posting flow, and publish at the listed BEST TIME.
+5. Repeat for the other platform subfolders in today's folder — post on all
+   of them, or just the ones you want; everything is already prepared.
 
 MADE THE MASTER IMAGE OR MASTER VIDEO?
 Those two hero assets are brand-level, not tied to a day folder — so they ship
@@ -512,12 +546,17 @@ WHAT'S INSIDE (root map)
 - MASTER_VIDEO_PROMPT.txt           master video reel prompt
 - campaign_schedule.csv             import into Buffer / Hootsuite / Metricool
 - all_website_screenshots/          every captured page, with a README map
-- Day-X_* folders                   one folder per post — your daily units
+- Day-X folders                     ONE folder per day — inside it, every
+                                    selected platform's post for that day,
+                                    each in its own <Platform>_<Tool> subfolder
+                                    (plus a DAY_PLAN.txt quick reference)
 
 TODAY'S FIRST 3 ACTIONS
 1. Open PLATFORM_POSTING_GUIDE.md and read your platform's section once.
-2. Open the Day-1 folder, make its visual, copy its caption.
-3. Publish it at today's best time. Momentum beats perfection — start now.
+2. Open the Day-1 folder, pick any platform subfolder, make its visual, copy
+   its caption.
+3. Publish it at today's best time — then do the next platform subfolder.
+   Momentum beats perfection — start now.
 ================================================================================`;
 }
 
@@ -579,7 +618,7 @@ export function buildCampaignOverview({ strategy, websiteData, posts, selectedPl
   md += `| MASTER_IMAGE_PROMPT.txt / MASTER_VIDEO_PROMPT.txt | Master visual prompts |\n`;
   md += `| campaign_schedule.csv | Scheduler import (Buffer / Hootsuite) |\n`;
   md += `| all_website_screenshots/ | Every captured page + README map |\n`;
-  md += `| Day-X_* folders | One folder per post (prompt + caption + screenshot) |\n\n`;
+  md += `| Day-X folders | ONE folder per day — inside, every selected platform's post for that day (<Platform>_<Tool>/ subfolders + DAY_PLAN.txt quick reference) |\n\n`;
 
   md += `## Campaign Schedule & Content Breakdown\n\n`;
   md += `| Day | Platform | Format | Focus Area | Hook |\n`;
@@ -753,6 +792,16 @@ Tag someone who's still juggling five tabs for this 😄
 
 ${c.tags.slice(0, 2).join(' ')}`,
   },
+  Reddit: {
+    image: (c) => `I put together a free ${c.industry} toolkit — here's what's inside
+
+${c.usp || `${c.brand} brings your ${c.industry} work into one clean, fast dashboard.`}
+
+${c.showcase.length ? `What you can do with it right now:\n${c.showcase.map((t) => `- ${t}`).join('\n')}` : ''}\n\nNo signup, no install, nothing gated — it just runs in the browser.\n\nTry it (it's free): ${c.domain}\n\nHappy to answer questions in the comments — what would you want it to do next?`,
+    video: (c) => `Recorded a real walkthrough of ${c.brand} — no cuts, no script
+
+This is the actual workflow:${c.showcase.length ? ` ${c.showcase.slice(0, 3).join(', ')}` : ` the full ${c.industry} flow`}, running live.\n\nEverything runs in the browser and nothing is uploaded anywhere, which is the part most people ask about first.\n\nTry it free: ${c.domain}\n\nFeedback welcome — especially from folks who've tried the paid alternatives.`,
+  },
   generic: {
     image: (c) => `${masterHook(c, 'image', 'Generic')}
 
@@ -780,6 +829,7 @@ const MASTER_BEST_TIME = {
   TikTok: '6–10 PM',
   'YouTube Shorts': '12–3 PM or 7–10 PM',
   Facebook: '1–4 PM',
+  Reddit: '8–11 AM EST (when the US crowd starts voting)',
 };
 
 const MASTER_HERO_TIP = {
@@ -789,6 +839,7 @@ const MASTER_HERO_TIP = {
   TikTok: 'Choose a cover frame with the brand name in big text — TikTok profiles are search-driven, and a clear cover wins clicks.',
   'YouTube Shorts': 'Pin a comment with your site link right after upload — the pinned comment gets the real clicks.',
   Facebook: 'Pin the launch post to the top of your page during launch week, and re-share it to any Groups you moderate.',
+  Reddit: 'Post to ONE subreddit, let it breathe, and stay in the comments for the first 2 hours — the thread rising or dying is decided by how fast you engage. Never cross-post the same asset to multiple subs the same hour.',
   generic: 'Pin or feature this post wherever your platform allows — hero assets should stay visible all launch week.',
 };
 

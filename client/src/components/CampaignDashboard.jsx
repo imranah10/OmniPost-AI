@@ -480,11 +480,14 @@ FILES INCLUDED (%SHOT_COUNT% Total):
 %SHOT_LIST%
 
 DAY FOLDER PAIRING:
-Every Day folder (Day-X_Platform_ToolName) contains ONE live screenshot —
-screenshot_tool_live.jpg — of THAT folder's own tool (or its studio overview
-if a per-tool capture is unavailable). The folder name and the image inside
-always describe the SAME tool. Duplicate before/after copies are gone: when
-the input and output captures are identical, you get exactly ONE file.
+Every Day folder (Day-X/) contains ONE subfolder per platform —
+Day-X/<Platform>_<ToolName>/ — and each subfolder carries its own live
+screenshot (screenshot_tool_live.jpg) of THAT post's own tool (or its studio
+overview if a per-tool capture is unavailable). The subfolder name and the
+image inside always describe the SAME tool. Duplicate before/after copies are
+gone: when the input and output captures are identical, you get exactly ONE
+file. DAY_PLAN.txt at the top of each day folder lists every platform post
+for that day with best times and hooks.
 
 HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
 1. FOR IMAGES (ChatGPT / Gemini / Midjourney):
@@ -524,18 +527,70 @@ HOW TO USE THESE ASSETS FOR 100% "HUBAHU" GENERATION:
         .replace('%SHOT_LIST%', bundledShotFiles.join('\n') || '- (no captures resolved yet — re-export in a minute for late screenshots)');
       allShotsFolder.file("README_SCREENSHOTS.txt", readmeContent);
 
-      // 8. DAY-WISE FOLDERS
-      for (let i = 0; i < posts.length; i++) {
-        const p = posts[i];
-        const daySlug = (p.day || `Day-${i + 1}`).replace(/\s+/g, '-');
-        const platSlug = (p.platform || 'Social').replace(/[^a-zA-Z0-9]/g, '');
-        const toolSlug = (p.toolName || `Post_${i + 1}`).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-        const folderName = `${daySlug}_${platSlug}_${toolSlug}`;
-        const dayFolder = zip.folder(folderName);
+      // 8. DAY-WISE FOLDERS — ONE folder per day, and INSIDE it every selected
+      //    platform gets its own subfolder + a DAY_PLAN.txt quick reference.
+      //    "user ne 4 social media select kiye → har day folder me un sabhi 4
+      //    platforms ka sabkuchh rahe — post kare ya na kare, content aana chahiye."
+      const dayOrder = [];
+      const dayGroups = new Map();
+      posts.forEach((p, i) => {
+        const dayKey = p.day || `Day-${i + 1}`;
+        if (!dayGroups.has(dayKey)) { dayGroups.set(dayKey, []); dayOrder.push(dayKey); }
+        dayGroups.get(dayKey).push(p);
+      });
+      const dayNumOf = (key) => {
+        const m = String(key).match(/(\d+)/);
+        return m ? parseInt(m[1]) : 0;
+      };
+      dayOrder.sort((a, b) => dayNumOf(a) - dayNumOf(b));
 
-        // a) post_ready_to_publish.txt
-        const readyText = `================================================================================
-DAY: ${p.day}
+      for (const dayKey of dayOrder) {
+        const dayPosts = dayGroups.get(dayKey);
+        const daySlug = dayKey.replace(/\s+/g, '-');
+        const dayFolder = zip.folder(daySlug);
+
+        // a0) DAY_PLAN.txt — the whole day at a glance
+        let planText = `================================================================================
+${String(dayKey).toUpperCase()} — TODAY'S POSTING PLAN
+Brand: ${strategy?.brandName || 'Brand'}
+Platforms today: ${dayPosts.map((p) => p.platform).join(', ')}
+================================================================================
+
+WHAT'S IN THIS FOLDER
+One subfolder per platform (<Platform>_<ToolName>). Each subfolder has
+everything for that post: post_ready_to_publish.txt (caption + hashtags +
+steps), ai_image_prompt.txt / ai_video_prompt.txt / carousel_prompt.txt, and
+the tool's real screenshot for a 1:1 brand match.
+
+QUICK REFERENCE — everything ready for today:`;
+        dayPosts.forEach((p, k) => {
+          const platSlug = (p.platform || 'Social').replace(/[^a-zA-Z0-9]/g, '');
+          const toolSlug = (p.toolName || `Post_${k + 1}`).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+          planText += `
+  ${k + 1}. ${String(p.platform).toUpperCase()} — ${p.contentType}
+     Tool: ${p.toolName} (${p.studio || 'Core Offerings'})
+     Best time: ${p.bestTime || '9:00 AM'}
+     Hook: ${p.hook}
+     Caption + hashtags: ${platSlug}_${toolSlug}/post_ready_to_publish.txt`;
+        });
+        planText += `
+
+TIP: You don't have to post on every platform — but everything is already
+prepared if you want to. Generate each visual with the bundled prompts
+(Gemini / ChatGPT / Midjourney / Higgsfield — attach the folder's screenshot),
+then publish following the 4 steps in each post_ready_to_publish.txt.
+================================================================================`;
+        dayFolder.file("DAY_PLAN.txt", planText);
+
+        for (let k = 0; k < dayPosts.length; k++) {
+          const p = dayPosts[k];
+          const platSlug = (p.platform || 'Social').replace(/[^a-zA-Z0-9]/g, '');
+          const toolSlug = (p.toolName || `Post_${k + 1}`).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+          const postFolder = dayFolder.folder(`${platSlug}_${toolSlug}`);
+
+          // a) post_ready_to_publish.txt
+          const readyText = `================================================================================
+DAY: ${dayKey}
 PLATFORM: ${p.platform}
 CONTENT FORMAT: ${p.contentType}
 SECTION / SUITE: ${p.studio || 'Core Offerings'}
@@ -544,9 +599,10 @@ BEST PUBLISHING TIME: ${p.bestTime || '9:00 AM'}
 ================================================================================
 
 HOW TO POST THIS POST (4 STEPS):
-1. Open 'ai_image_prompt.txt' — copy the prompt, paste it into the Gemini app /
-   ChatGPT / Midjourney (attach 'screenshot_tool_live.jpg' for a 100%
-   brand-accurate visual) — save the generated photo or video.
+1. Open 'ai_image_prompt.txt' (or ai_video_prompt.txt / carousel_prompt.txt) —
+   copy the prompt, paste it into the Gemini app / ChatGPT / Midjourney
+   (attach 'screenshot_tool_live.jpg' for a 100% brand-accurate visual) —
+   save the generated photo or video.
 2. Come back here — copy the FULL POST CAPTION + HASHTAGS below.
 3. Open ${p.platform}, create the post, attach your generated visual.
 4. Paste the caption + hashtags → publish at ${p.bestTime || '9:00 AM'}. Done!
@@ -558,7 +614,7 @@ ${p.hook}
 ${p.caption}
 
 [HASHTAGS]
-${(p.hashtags || []).join(' ')}
+${(p.hashtags || []).length ? (p.hashtags || []).join(' ') : '(none — this platform does not use hashtags)'}
 
 [CALL TO ACTION]
 ${p.callToAction}
@@ -567,20 +623,20 @@ ${p.callToAction}
 OmniPost AI Automated Strategy Note:
 Publish on ${p.platform} at ${p.bestTime || '9:00 AM'} for maximum reach and engagement.
 ================================================================================`;
-        dayFolder.file("post_ready_to_publish.txt", readyText);
+          postFolder.file("post_ready_to_publish.txt", readyText);
 
-        // b) ai_image_prompt.txt (UNIQUE per post — visual angle rotation)
-        const imgPromptText = p.imagePrompt || p.aiImagePrompt || `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
+          // b) ai_image_prompt.txt (UNIQUE per post — visual angle rotation)
+          const imgPromptText = p.imagePrompt || p.aiImagePrompt || `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
 (💡 TIP: Attach 'screenshot_tool_live.jpg' alongside this prompt into ChatGPT or Gemini for 100% brand UI matching!)
 
 Create a high-converting, photorealistic commercial product advertising hero visual for "${strategy.brandName}" (${strategy.industry}).
 - Subject: A sleek glassmorphic 3D device mockup showcasing "${p.toolName}" from the "${p.studio || 'Core'}" section.
 - Visual Style: Ultra-clean enterprise aesthetic, luxury minimalist studio lighting, subtle neon cyber accents.
 - Composition: Centered social media format, crisp depth of field, high dynamic range (HDR), 8K render.`;
-        dayFolder.file("ai_image_prompt.txt", imgPromptText);
+          postFolder.file("ai_image_prompt.txt", imgPromptText);
 
-        // c) ai_video_prompt.txt
-        const vidPromptText = p.aiVideoPrompt || `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA:
+          // c) ai_video_prompt.txt
+          const vidPromptText = p.aiVideoPrompt || `PROMPT FOR HIGGSFIELD / RUNWAY GEN-3 / LUMA / SORA:
 (💡 TIP: Upload 'screenshot_tool_live.jpg' or 'visual_creative.png' as the starting frame / image-to-video source)
 
 9:16 vertical social video commercial reel.
@@ -588,113 +644,116 @@ Create a high-converting, photorealistic commercial product advertising hero vis
 - Scene 2 (2-5s): Interactive UI animation, glowing cursor point triggering "${p.hook}", vibrant particle waves.
 - Scene 3 (5-8s): Dynamic split-second showcase of instant results with high-end corporate motion graphics.
 - Camera: Smooth floating motion, 4k 60fps, photorealistic reflections, cinematic depth of field.`;
-        dayFolder.file("ai_video_prompt.txt", vidPromptText);
+          postFolder.file("ai_video_prompt.txt", vidPromptText);
 
-        // d) visual_creative (AI generated visual — blob reused when already in memory)
-        {
-          try {
-            const imgBlob = p.rawBlob || (p.generatedImageUrl ? await getBlobCached(p.generatedImageUrl) : null);
-            if (imgBlob) {
-              const isPng = (imgBlob.type || '').includes('png');
-              dayFolder.file(`visual_creative.${isPng ? 'png' : 'jpg'}`, imgBlob);
-            }
-            if (p.cardDataUrl) {
-              const cardBlob = await getBlobCached(p.cardDataUrl);
-              if (cardBlob) dayFolder.file("branded_card.png", cardBlob);
-            }
-          } catch (err) {
-            console.warn(`Could not bundle visual for ${p.day}:`, err.message);
-          }
-        }
-
-        // d2) (AI media bundling removed — visuals are made outside the app
-        //     with the bundled prompts; see HOW TO POST steps in each txt)
-
-        // e) Live screenshot — ONE file per tool. The old code wrote the SAME
-        //    capture up to three times (before/after/raw). Deduped by URL: a
-        //    single screenshot_tool_live.jpg unless input/output genuinely
-        //    differ, in which case the before/after pair is kept.
-        const matchedShot = shotForTool(websiteData, { toolName: p.toolName, studio: p.studio, toolUrl: p.toolUrl });
-        const inputUrl = p.inputScreenshotUrl || matchedShot?.webUrl || '';
-        const outputUrl = p.outputScreenshotUrl || matchedShot?.webUrl || p.screenshotUrl || '';
-        const rawUrl = p.screenshotUrl || matchedShot?.webUrl || outputUrl || inputUrl || '';
-
-        const writeShot = async (name, url) => {
-          if (!url) return false;
-          try {
-            const blob = await fetchRealShotBlob(url);
-            if (blob) {
-              dayFolder.file(name, blob);
-              return true;
-            }
-          } catch (err) {
-            console.warn(`Could not bundle ${name} for ${p.day}:`, err.message);
-          }
-          return false;
-        };
-
-        if (inputUrl && outputUrl && inputUrl !== outputUrl) {
-          const okBefore = await writeShot('screenshot_before_input.jpg', inputUrl);
-          const okAfter = await writeShot('screenshot_after_output.jpg', outputUrl);
-          if (rawUrl && rawUrl !== inputUrl && rawUrl !== outputUrl) {
-            await writeShot('raw_screenshot.jpg', rawUrl);
-          }
-          if (!okBefore && !okAfter) {
-            // Tool captures still generating upstream — fall back to the
-            // VERIFIED homepage capture instead of shipping a blank.
-            await writeShot('screenshot_tool_live.jpg', websiteData.screenshotUrl);
-          }
-        } else {
-          const okShot = await writeShot('screenshot_tool_live.jpg', rawUrl || outputUrl || inputUrl);
-          if (!okShot) {
-            await writeShot('screenshot_tool_live.jpg', websiteData.screenshotUrl);
-          }
-        }
-
-        // f) If video post: video_reel.webm/.mp4 and video_script.md
-        if (p.contentType?.includes('Video') || p.videoScript) {
-          if (p.videoBlob) {
-            const isWebm = (p.videoBlob.type || '').includes('webm');
-            dayFolder.file(`video_reel.${isWebm ? 'webm' : 'mp4'}`, p.videoBlob);
-          } else if (p.videoUrl) {
+          // d) visual_creative (AI generated visual — blob reused when already in memory)
+          {
             try {
-              const vidRes = await fetch(p.videoUrl);
-              if (vidRes.ok) {
-                const vBlob = await vidRes.blob();
-                const isWebm = (vBlob.type || '').includes('webm');
-                dayFolder.file(`video_reel.${isWebm ? 'webm' : 'mp4'}`, vBlob);
+              const imgBlob = p.rawBlob || (p.generatedImageUrl ? await getBlobCached(p.generatedImageUrl) : null);
+              if (imgBlob) {
+                const isPng = (imgBlob.type || '').includes('png');
+                postFolder.file(`visual_creative.${isPng ? 'png' : 'jpg'}`, imgBlob);
+              }
+              if (p.cardDataUrl) {
+                const cardBlob = await getBlobCached(p.cardDataUrl);
+                if (cardBlob) postFolder.file("branded_card.png", cardBlob);
               }
             } catch (err) {
-              console.warn(`Could not bundle video for ${p.day}:`, err.message);
+              console.warn(`Could not bundle visual for ${dayKey}/${p.platform}:`, err.message);
             }
           }
 
-          if (p.videoScript) {
-            let scriptDoc = `# ${strategy.brandName} - Video Reel Script (${p.day})\n\n`;
-            scriptDoc += `**Hook:** ${p.hook}\n`;
-            scriptDoc += `**Duration:** ${p.videoScript.duration || '30s'} | **Audio Vibe:** ${p.videoScript.audioVibe || 'Energetic Lo-Fi Beat'}\n\n`;
-            (p.videoScript.scenes || []).forEach(s => {
-              scriptDoc += `### Scene ${s.sceneNumber} (${s.time || ''})\n`;
-              scriptDoc += `- Visual Direction: ${s.visualDirection}\n`;
-              scriptDoc += `- On-Screen Text: ${s.onScreenText}\n`;
-              scriptDoc += `- Voiceover Audio: ${s.voiceoverAudio}\n\n`;
-            });
-            scriptDoc += `**Call To Action:** ${p.callToAction}\n`;
-            dayFolder.file("video_script.md", scriptDoc);
-          }
-        }
+          // d2) (AI media bundling removed — visuals are made outside the app
+          //     with the bundled prompts; see HOW TO POST steps in each txt)
 
-        // g) Carousel PROMPT — every image post ships a copy-paste prompt that
-        //    generates the swipeable deck in Gemini / ChatGPT / Midjourney
-        //    (no canvas-rendered carousel images — user rule: prompt do, image nahi)
-        if (!p.contentType?.includes('Video') && !p.videoScript) {
-          try {
-            dayFolder.file('carousel_prompt.txt', buildCarouselPrompt(p, strategy, websiteData));
-          } catch (err) {
-            console.warn(`Could not build carousel prompt for ${p.day}:`, err.message);
+          // e) Live screenshot — ONE file per tool. The old code wrote the SAME
+          //    capture up to three times (before/after/raw). Deduped by URL: a
+          //    single screenshot_tool_live.jpg unless input/output genuinely
+          //    differ, in which case the before/after pair is kept.
+          const matchedShot = shotForTool(websiteData, { toolName: p.toolName, studio: p.studio, toolUrl: p.toolUrl });
+          const inputUrl = p.inputScreenshotUrl || matchedShot?.webUrl || '';
+          const outputUrl = p.outputScreenshotUrl || matchedShot?.webUrl || p.screenshotUrl || '';
+          const rawUrl = p.screenshotUrl || matchedShot?.webUrl || outputUrl || inputUrl || '';
+
+          const writeShot = async (name, url) => {
+            if (!url) return false;
+            try {
+              const blob = await fetchRealShotBlob(url);
+              if (blob) {
+                postFolder.file(name, blob);
+                return true;
+              }
+            } catch (err) {
+              console.warn(`Could not bundle ${name} for ${dayKey}/${p.platform}:`, err.message);
+            }
+            return false;
+          };
+
+          if (inputUrl && outputUrl && inputUrl !== outputUrl) {
+            const okBefore = await writeShot('screenshot_before_input.jpg', inputUrl);
+            const okAfter = await writeShot('screenshot_after_output.jpg', outputUrl);
+            if (rawUrl && rawUrl !== inputUrl && rawUrl !== outputUrl) {
+              await writeShot('raw_screenshot.jpg', rawUrl);
+            }
+            if (!okBefore && !okAfter) {
+              // Tool captures still generating upstream — fall back to the
+              // VERIFIED homepage capture instead of shipping a blank.
+              await writeShot('screenshot_tool_live.jpg', websiteData.screenshotUrl);
+            }
+          } else {
+            const okShot = await writeShot('screenshot_tool_live.jpg', rawUrl || outputUrl || inputUrl);
+            if (!okShot) {
+              await writeShot('screenshot_tool_live.jpg', websiteData.screenshotUrl);
+            }
+          }
+
+          // f) If video post: video_reel.webm/.mp4 and video_script.md
+          if (p.contentType?.includes('Video') || p.videoScript) {
+            if (p.videoBlob) {
+              const isWebm = (p.videoBlob.type || '').includes('webm');
+              postFolder.file(`video_reel.${isWebm ? 'webm' : 'mp4'}`, p.videoBlob);
+            } else if (p.videoUrl) {
+              try {
+                const vidRes = await fetch(p.videoUrl);
+                if (vidRes.ok) {
+                  const vBlob = await vidRes.blob();
+                  const isWebm = (vBlob.type || '').includes('webm');
+                  postFolder.file(`video_reel.${isWebm ? 'webm' : 'mp4'}`, vBlob);
+                }
+              } catch (err) {
+                console.warn(`Could not bundle video for ${dayKey}/${p.platform}:`, err.message);
+              }
+            }
+
+            if (p.videoScript) {
+              let scriptDoc = `# ${strategy.brandName} - Video Reel Script (${dayKey} — ${p.platform})\n\n`;
+              scriptDoc += `**Tool shown working:** ${p.toolName} (${p.studio || 'Core'})\n`;
+              scriptDoc += `**Hook:** ${p.hook}\n`;
+              scriptDoc += `**Duration:** ${p.videoScript.duration || '30s'} | **Audio Vibe:** ${p.videoScript.audioVibe || 'Energetic Lo-Fi Beat'}\n\n`;
+              (p.videoScript.scenes || []).forEach(s => {
+                scriptDoc += `### Scene ${s.sceneNumber} (${s.time || ''})\n`;
+                scriptDoc += `- Visual Direction: ${s.visualDirection}\n`;
+                scriptDoc += `- On-Screen Text: ${s.onScreenText}\n`;
+                scriptDoc += `- Voiceover Audio: ${s.voiceoverAudio}\n\n`;
+              });
+              scriptDoc += `**Call To Action:** ${p.callToAction}\n`;
+              postFolder.file("video_script.md", scriptDoc);
+            }
+          }
+
+          // g) Carousel PROMPT — every image post ships a copy-paste prompt that
+          //    generates the swipeable deck in Gemini / ChatGPT / Midjourney
+          //    (no canvas-rendered carousel images — user rule: prompt do, image nahi)
+          if (!p.contentType?.includes('Video') && !p.videoScript) {
+            try {
+              postFolder.file('carousel_prompt.txt', buildCarouselPrompt(p, strategy, websiteData));
+            } catch (err) {
+              console.warn(`Could not build carousel prompt for ${dayKey}/${p.platform}:`, err.message);
+            }
           }
         }
       }
+
 
       // 9. WORLD_LANGUAGES — AI-transcreated hero posts per market
       if (langPack && langPack.languages && Object.keys(langPack.languages).length) {
@@ -951,6 +1010,7 @@ Create a high-converting, photorealistic commercial product advertising hero vis
             { id: 'instagram', label: 'Instagram' },
             { id: 'linkedin', label: 'LinkedIn' },
             { id: 'twitter', label: 'Twitter / X' },
+            { id: 'reddit', label: 'Reddit' },
             { id: 'languages', label: '🌍 World Languages' },
           ].map(tab => (
             <button
