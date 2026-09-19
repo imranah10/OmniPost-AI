@@ -75,13 +75,25 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 page.setDefaultTimeout(60000);
 
+// Pull the proxied target URL out of ANY proxy style (query `url=`/`u=` or
+// path-style like r.jina.ai/https://…), so live-site runs stay fully mocked.
+const extractTarget = (u) => {
+  const m = u.match(/[?&](?:url|u|target|link)=([^&]+)/);
+  if (m) { try { return decodeURIComponent(m[1]); } catch { return m[1]; } }
+  const i = u.lastIndexOf('http');
+  if (i > 0) { let t = u.slice(i); try { t = decodeURIComponent(t); } catch {} return t.split('&')[0]; }
+  return null;
+};
+
 await page.route('**/*', async (route) => {
   const url = route.request().url();
-  if (url.startsWith(BASE)) {
-    if (url.includes('/api/proxy?url=')) {
-      const target = decodeURIComponent(url.split('url=')[1]?.split('&')[0] || '');
-      return route.fulfill(mockFor(target));
-    }
+  if (url.includes('/api/proxy?url=')) {
+    const target = decodeURIComponent(url.split('url=')[1]?.split('&')[0] || '');
+    return route.fulfill(mockFor(target));
+  }
+  const target = extractTarget(url);
+  if (target && /^https?:\/\//i.test(target)) return route.fulfill(mockFor(target));
+  if (url.startsWith(BASE) || url.includes('imranah10.github.io')) {
     return route.continue();
   }
   return route.fulfill({ status: 404, contentType: 'text/plain', body: 'blocked' });
