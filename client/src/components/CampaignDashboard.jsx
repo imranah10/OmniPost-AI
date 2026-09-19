@@ -14,7 +14,7 @@ import {
   AlertTriangle,
   Globe
 } from 'lucide-react';
-import { generateLanguagePack } from '../lib/aiClient.js';
+import { generateLanguagePack, imageSpecFor } from '../lib/aiClient.js';
 import MasterStudioModal from './MasterStudioModal.jsx';
 import { buildCarouselPrompt } from '../lib/carousel.js';
 import { API_BASE } from '../config.js';
@@ -671,13 +671,18 @@ Publish on ${p.platform} at ${p.bestTime || '9:00 AM'} for maximum reach and eng
           postFolder.file("post_ready_to_publish.txt", readyText);
 
           // b) ai_image_prompt.txt (UNIQUE per post — visual angle rotation)
+          const imgSpec = imageSpecFor(p.platform);
           const imgPromptText = p.imagePrompt || p.aiImagePrompt || `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY:
 (💡 TIP: Attach 'screenshot_tool_live.jpg' alongside this prompt into ChatGPT or Gemini for 100% brand UI matching!)
 
 Create a high-converting, photorealistic commercial product advertising hero visual for "${strategy.brandName}" (${strategy.industry}).
 - Subject: A sleek glassmorphic 3D device mockup showcasing "${p.toolName}" from the "${p.studio || 'Core'}" section.
 - Visual Style: Ultra-clean enterprise aesthetic, luxury minimalist studio lighting, subtle neon cyber accents.
-- Composition: Centered social media format, crisp depth of field, high dynamic range (HDR), 8K render.`;
+- Composition: Centered social media format, crisp depth of field, high dynamic range (HDR), 8K render.
+- Aspect Ratio (MANDATORY — final image MUST be ${imgSpec.ratio}):
+   • Exact export size: ${imgSpec.px} (${imgSpec.orientation})
+   • DALL-E 3 / Gemini: ${imgSpec.dallE}
+   • Midjourney: append ${imgSpec.midjourney}`;
           postFolder.file("ai_image_prompt.txt", imgPromptText);
 
           // c) ai_video_prompt.txt
@@ -1277,23 +1282,31 @@ Create a high-converting, photorealistic commercial product advertising hero vis
                             <span className="font-bold text-amber-300 flex items-center gap-1">
                               🎨 ChatGPT / Gemini Prompt
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyPrompt(post, 'image')}
-                              className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[10px] font-bold border border-amber-500/30 transition cursor-pointer flex items-center gap-1"
-                            >
-                              {copiedPromptKey === `${post.id}-image` ? (
-                                <>
-                                  <Check className="w-3 h-3 text-emerald-400" />
-                                  <span>Copied!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3 h-3" />
-                                  <span>Copy Image Prompt</span>
-                                </>
-                              )}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                title={`Final image must be ${imageSpecFor(post.platform).ratio} — ${imageSpecFor(post.platform).px}`}
+                                className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-bold border border-sky-500/30 whitespace-nowrap"
+                              >
+                                📐 {imageSpecFor(post.platform).ratio} · {imageSpecFor(post.platform).px}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPrompt(post, 'image')}
+                                className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[10px] font-bold border border-amber-500/30 transition cursor-pointer flex items-center gap-1"
+                              >
+                                {copiedPromptKey === `${post.id}-image` ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Copy Image Prompt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
                           <p className="text-[10px] text-slate-400 italic mb-1">
                             💡 Attach <code className="text-amber-300 font-mono">screenshot_tool_live.jpg</code> (this tool's real UI) for an authentic, brand-accurate visual!

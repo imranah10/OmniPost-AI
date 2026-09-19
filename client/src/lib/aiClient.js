@@ -710,6 +710,56 @@ const VISUAL_ANGLES = [
   },
 ];
 
+/* ------------------------------------------------------------------ */
+/* PLATFORM-EXACT IMAGE SPECS — every image prompt must STATE the      */
+/* aspect ratio explicitly (user rule: "ratio to bataya hi nahi tha"). */
+/* Ratios follow each platform's max-CTR feed spec.                    */
+/* ------------------------------------------------------------------ */
+export const PLATFORM_IMAGE_SPECS = {
+  instagram: {
+    ratio: '4:5', orientation: 'portrait (Instagram feed max-CTR size)',
+    px: '1080 x 1350 px', dallE: '1024 x 1792 portrait, then crop to 4:5', midjourney: '--ar 4:5',
+  },
+  linkedin: {
+    ratio: '1:1', orientation: 'square (LinkedIn feed-safe)',
+    px: '1200 x 1200 px', dallE: '1024 x 1024 square', midjourney: '--ar 1:1',
+  },
+  'twitter/x': {
+    ratio: '16:9', orientation: 'landscape (X timeline widescreen)',
+    px: '1600 x 900 px', dallE: '1792 x 1024 landscape', midjourney: '--ar 16:9',
+  },
+  tiktok: {
+    ratio: '9:16', orientation: 'full-vertical (TikTok frame)',
+    px: '1080 x 1920 px', dallE: '1024 x 1792 portrait, then crop to 9:16', midjourney: '--ar 9:16',
+  },
+  'youtube shorts': {
+    ratio: '9:16', orientation: 'full-vertical (Shorts frame)',
+    px: '1080 x 1920 px', dallE: '1024 x 1792 portrait, then crop to 9:16', midjourney: '--ar 9:16',
+  },
+  facebook: {
+    ratio: '4:5', orientation: 'portrait (Facebook feed max-CTR size)',
+    px: '1080 x 1350 px', dallE: '1024 x 1792 portrait, then crop to 4:5', midjourney: '--ar 4:5',
+  },
+  reddit: {
+    ratio: '1:1', orientation: 'square (Reddit preview-safe)',
+    px: '1080 x 1080 px', dallE: '1024 x 1024 square', midjourney: '--ar 1:1',
+  },
+};
+
+export function imageSpecFor(platform) {
+  const key = String(platform || '').toLowerCase().trim();
+  return PLATFORM_IMAGE_SPECS[key] || PLATFORM_IMAGE_SPECS.instagram;
+}
+
+/** Explicit, copy-paste-safe aspect-ratio block for human-facing image prompts. */
+function ratioBlock(spec) {
+  return `- Aspect Ratio (MANDATORY — the final image MUST be ${spec.ratio}):
+   • Exact export size: ${spec.px} (${spec.orientation})
+   • DALL-E 3 / Gemini: ${spec.dallE}
+   • Midjourney: append ${spec.midjourney}
+   • Compose the scene freely, but crop/export the FINAL image to exactly ${spec.ratio}.`;
+}
+
 export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj = {}, websiteData = {}, postIndex = 0 }) {
   const brandName = strategy?.brandName || websiteData?.title || 'Brand';
   const industry = strategy?.industry || 'Technology & Digital Solutions';
@@ -740,6 +790,8 @@ export function buildPostAIPrompts({ strategy, post, toolName, studio, toolObj =
     ctaShort: String(post?.callToAction || `Try ${toolName} now`).replace(/👉.*$/g, '').slice(0, 48),
   };
 
+  const imgSpec = imageSpecFor(post?.platform);
+
   const aiImagePrompt = `PROMPT FOR CHATGPT (DALL-E 3) / GEMINI / MIDJOURNEY — VISUAL ANGLE ${postIndex + 1}: ${angle.key.toUpperCase()}
 (💡 TIP FOR 100% "HUBAHU" BRAND ACCURACY: Attach 'screenshot_tool_live.jpg' — this tool's real UI — alongside this prompt into ChatGPT or Gemini!)
 
@@ -748,9 +800,10 @@ Prompt: Create a high-converting commercial advertising visual for "${brandName}
 - Spotlight capability: "${toolName}" (${studio})${b.single ? ` — delivers: ${b.after}` : ` — input state: ${b.before}; live result: ${b.after}`}.
 - Visual Style: ${angle.style}
 - Composition: ${angle.composition}
+${ratioBlock(imgSpec)}
 - Details: ${angle.detail}`;
 
-  const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio})${b.single ? ` — delivers "${b.after}" instantly` : ` — takes "${b.before}" and returns "${b.after}" instantly`}. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. No embedded text or watermarks.`;
+  const directImagePrompt = `${angle.concept(b)} for the brand "${brandName}" (${industry}). Capability showcased: ${toolName} (${studio})${b.single ? ` — delivers "${b.after}" instantly` : ` — takes "${b.before}" and returns "${b.after}" instantly`}. Style: ${angle.style}. Composition: ${angle.composition}. ${angle.detail}. Final image aspect ratio: exactly ${imgSpec.ratio} (${imgSpec.px}; ${imgSpec.dallE}). No embedded text or watermarks.`;
 
   const working = toolWorkingSteps({ toolObj, toolName: b.tool, studio: b.studio, brandName, domain });
   const workingBlock = working.steps.map((s, i) => `${i + 1}. ${s.label}: ${s.text}`).join('\n');
@@ -1112,7 +1165,7 @@ function buildTemplateCampaign({ websiteData, strategy, days, customPrompt, caro
 
       const prompts = buildPostAIPrompts({
         strategy,
-        post: { hook, callToAction: cta },
+        post: { hook, callToAction: cta, platform },
         toolName: tool.name,
         studio,
         toolObj: tool,
@@ -1227,7 +1280,7 @@ export async function generateFullCampaign({
 
     const prompts = buildPostAIPrompts({
       strategy,
-      post: { hook, callToAction: cta },
+      post: { hook, callToAction: cta, platform: finalPlatform },
       toolName,
       studio,
       toolObj,
@@ -1255,6 +1308,20 @@ export async function generateFullCampaign({
       '#BusinessGrowth', '#Innovation', '#FutureOfWork',
     ];
 
+    // RATIO GUARD: whichever image prompt survives (LLM-authored or ours),
+    // the explicit aspect-ratio block is ALWAYS present (user rule) — and
+    // the 900-char cap is gone because it silently cut the ratio block off.
+    const platformSpec = imageSpecFor(finalPlatform);
+    const compactRatio = `Aspect Ratio (MANDATORY): exactly ${platformSpec.ratio} — ${platformSpec.px}; DALL-E/Gemini: ${platformSpec.dallE}; Midjourney: append ${platformSpec.midjourney}.`;
+    const llmImg = String(p.imagePrompt || '').trim();
+    const llmHasRatio = /aspect ratio/i.test(llmImg);
+    const finalImagePrompt = llmImg
+      ? (llmHasRatio ? llmImg : `${llmImg}\n- ${compactRatio}`)
+      : prompts.aiImagePrompt;
+    const finalGeminiPrompt = llmImg
+      ? (llmHasRatio ? llmImg : `${llmImg} ${compactRatio}`)
+      : prompts.directImagePrompt;
+
     return {
       id: `post-${i + 1}`,
       day: `Day ${dayOf(i)}`,
@@ -1276,9 +1343,9 @@ export async function generateFullCampaign({
       rawScreenshot: shot?.webUrl || websiteData.screenshotUrl,
       testedInput: toolObj.testedInput || 'Interactive Parameters',
       testedOutput: toolObj.testedOutput || 'Live Computation Executed',
-      imagePrompt: String(p.imagePrompt || prompts.aiImagePrompt).slice(0, 900),
+      imagePrompt: finalImagePrompt.slice(0, 2400),
       aiImagePrompt: prompts.aiImagePrompt,
-      geminiImagePrompt: String(p.imagePrompt || prompts.directImagePrompt).slice(0, 900),
+      geminiImagePrompt: finalGeminiPrompt.slice(0, 2000),
       aiVideoPrompt: prompts.aiVideoPrompt,
       geminiVideoPrompt: prompts.directVideoPrompt,
       visualAngle: p.visualAngle || prompts.angleKey,
